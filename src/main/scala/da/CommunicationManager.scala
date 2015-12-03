@@ -66,6 +66,7 @@ class CommunicationManager( address: InetAddress,
   // check how to fix this (if it is broken)
   override def receive = {
     case Init =>
+      println("Preparing UDP sender for " + sender.path.name + ". Please wait...")
       context.become(expectUdpReady(sender))
       manager ! Udp.SimpleSender(List(InetProtocolFamily(), ReuseAddress(true)))
     
@@ -87,13 +88,13 @@ class CommunicationManager( address: InetAddress,
   }
   
   def clientRouter(client: ActorRef, send: ActorRef): Receive = {
-    case inputValue @InputValue(v, seq, id) =>
-      log.info(" recieved input value " + v)
+    case inputValue @InputValue(uuid, msgBody) =>
+      log.info(" recieved input value " + uuid + " " + msgBody)
       log.info("sending message to Proposer at" + groups("proposer"))
-      send ! Udp.Send(ByteString(inputMessage + v + separator + seq + separator + id), groups("proposer"))
+      send ! Udp.Send(ByteString( inputMessage + uuid + separator + msgBody ), groups("proposer"))
   }
   
   def proposerRouter(proposer: ActorRef, send: ActorRef): Receive = {
-    case inputValue @InputValue(_,_,_) => proposer ! inputValue 
+    case inputValue @InputValue(_,_) => proposer ! inputValue 
   }
 }

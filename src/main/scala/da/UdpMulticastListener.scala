@@ -6,6 +6,7 @@ import akka.io.Inet.{SocketOption, DatagramChannelCreator, SocketOptionV2 }
 import akka.io.Inet.SO.ReuseAddress
 import akka.util.ByteString
 
+import java.util.UUID
 import java.nio.channels.DatagramChannel
 import java.net.StandardProtocolFamily
 import java.net.DatagramSocket
@@ -51,8 +52,8 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
   val group = MulticastGroup(address, port )
   val manager = IO(Udp)
   val opts = List(InetProtocolFamily(), ReuseAddress(true), group)
-  // TODO read from configuration
-  println("Address is " + address)
+
+  println("Preparing UDP Listener. Please wait...")
   manager ! Udp.Bind(self, new InetSocketAddress(port), opts)
 
   def receive = {
@@ -72,10 +73,10 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
       
       header match {
         case inputMessage => 
-          val (value, seq, senderId) = { val array = body.split(separator)
-                                         (array(0), array(1).toLong, array(2).toInt) }
+          val (uuid, msgBody) = { val array = body.split(separator)
+                                         ( UUID.fromString(array(0)), array(1)) }
           log.info(" sending to proposer through comm. manager: " + body )
-          communicationManager ! InputValue(value, seq, senderId)
+          communicationManager ! InputValue(uuid, msgBody)
       }
        
     case Udp.Unbind  => socket ! Udp.Unbind
