@@ -62,6 +62,13 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
    *
    * TODO implement a resend mechanism later on. I need a future for each message, the good thing is that it will
    * be non-blocking!
+   * 
+   * TODO it would be good to find a way to make a deterministic choice regarding the order of messages from 
+   * clients, maybe this is why it is better to assign a sequence number here not at the proposer actually.
+   * This way, if a proposer dies, I would only need to resent form the clients since I do not care
+   * about the crashing of a client, as I can just ignore the rest of its messages, or maybe store it on
+   * stable storage. The TA mentioned something about killing the clients, so maybe better add that anyway,
+   * and only remove the values when I know that the value is learnt.  
    */
   override def receive = PartialFunction[Any, Unit] {
     case CommunicationManagerReady => 
@@ -71,19 +78,19 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
       self ! ToSend(inputs.head, inputs.tail)
   }
   
-  def messageSender(messages: Map[UUID, (InputValue, MessageState)]): Receive = {
+  def messageSender(state: Map[UUID, (InputValue, MessageState)]): Receive = {
     case ToSend(input, Nil) => 
       val msgID = UUID.randomUUID()
       val msg = InputValue(msgID, input)
       commManager ! msg
-      context.become(messageSender( messages +  ( msgID -> (msg, Added) ) ))
+      context.become(messageSender( state +  ( msgID -> (msg, Added) ) ))
       log.info("Sent all inputs, stopping...") 
 //      context.stop(self)
     case ToSend(input, rest) => 
       val msgID = UUID.randomUUID()
       val msg = InputValue(msgID, input)
       commManager ! msg
-      context.become(messageSender( messages +  ( msgID -> (msg, Added) ) ))
+      context.become(messageSender( state +  ( msgID -> (msg, Added) ) ))
       self ! ToSend(rest.head, rest.tail)
   }
 }

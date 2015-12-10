@@ -29,8 +29,12 @@ import UDPMulticastConf._
  * TODO how can we deal with the fact that UDP datagrams might be dropped? or do we not have to worry about that?
  */
 object UdpHeaders {
-  def separator = " "
-  def inputMessage = "INPUT" + separator
+  val separator = " "
+  val inputMessage = "INPUT"
+  val phase1A = "1A"
+  val phase1B = "1B"
+  val heartBeat = "H"
+  val incomingHeartBeat = "HI"
 }
 /**
  * TODO I think I will separate the sender part, put it with the listener and hide both behind a single manager actor
@@ -54,6 +58,7 @@ class CommunicationManager( address: InetAddress,
   
   import context.system
   import Proposer._
+  import Acceptor._
   import UdpHeaders._
   import CommunicationManager._
   
@@ -84,6 +89,10 @@ class CommunicationManager( address: InetAddress,
           log.info("becoming a proposer router "); 
           context.become(proposerRouter(participantSender, sender))
           participantSender ! CommunicationManagerReady
+        case _ if participantSender.path.name.contains("acceptor") => 
+          log.info("becoming an acceptor router "); 
+          context.become(acceptorRouter(participantSender, sender))
+          participantSender ! CommunicationManagerReady
       }     
   }
   
@@ -91,10 +100,21 @@ class CommunicationManager( address: InetAddress,
     case inputValue @InputValue(uuid, msgBody) =>
       log.info(" recieved input value " + uuid + " " + msgBody)
       log.info("sending message to Proposer at" + groups("proposer"))
-      send ! Udp.Send(ByteString( inputMessage + uuid + separator + msgBody ), groups("proposer"))
+      send ! Udp.Send(ByteString( inputMessage + separator + uuid + separator + msgBody ), groups("proposer"))
   }
   
   def proposerRouter(proposer: ActorRef, send: ActorRef): Receive = {
-    case inputValue @InputValue(_,_) => proposer ! inputValue 
+    case inputValue @InputValue(_,_) => proposer ! inputValue
+    case a1 @ Phase1A(seq) => send ! Udp.Send( ByteString (phase1A + separator + seq), groups("acceptor") )
+    case b1 @ Phase1B(rnd, v_rnd) => proposer ! b1
+    case h @ HeartBeat(round) => send ! Udp.Send(ByteString (heartBeat + separator + round), groups("proposer"))
+    case hi @ IncomingHeartBeat(round) => proposer ! hi
+  }
+  
+  def acceptorRouter(acceptor: ActorRef, send: ActorRef): Receive = {
+    case a1 @ Phase1A(_) => acceptor ! a1
+    case b1 @ Phase1B(rnd, v_rnd) =>
+      log.info("Sending phase 1B to proposers from comm. manager")
+      send ! Udp.Send(ByteString (phase1B + separator + rnd + separator + v_rnd), groups("proposer"))
   }
 }

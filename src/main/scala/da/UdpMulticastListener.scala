@@ -47,6 +47,7 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
   
   import context.system
   import Proposer._
+  import Acceptor._
   import UdpHeaders._
   
   val group = MulticastGroup(address, port )
@@ -72,11 +73,27 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
                              ( array(0), array(1) ) }
       
       header match {
-        case inputMessage => 
+        case `inputMessage` => 
           val (uuid, msgBody) = { val array = body.split(separator)
                                          ( UUID.fromString(array(0)), array(1)) }
           log.info(" sending to proposer through comm. manager: " + body )
           communicationManager ! InputValue(uuid, msgBody)
+          
+        case `phase1A` =>
+          log.info(" sending to acceptor through comm. manager: " + body)
+          communicationManager ! Phase1A(body.toLong)
+          
+        case `phase1B` =>
+          log.info(" sending to proposer from listener through comm. manager: " + body)
+          val (rnd, v_rnd) = { val array = body.split(separator)
+                                         ( array(0).toLong, array(1).toLong) }
+          communicationManager ! Phase1B(rnd, v_rnd)
+          
+        case `heartBeat` =>
+          log.info(" sending heartbeat to other proposers ")
+          communicationManager ! IncomingHeartBeat(body.toLong)
+          
+        case unkown => log.info("Unkonwn header! " + unkown)
       }
        
     case Udp.Unbind  => socket ! Udp.Unbind

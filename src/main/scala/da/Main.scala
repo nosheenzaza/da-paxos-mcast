@@ -17,6 +17,7 @@ import java.net.InetSocketAddress
 import scopt.OptionParser
 
 import scala.concurrent.duration._
+import scala.language.postfixOps 
 
 import UDPMulticastConf._
 
@@ -34,7 +35,8 @@ object Main {
   //TODO put each functionality in a separate function
   def main(args: Array[String]) {
     // TODO what is the best way to avoid this garbage logic?
-    // I can just return config and throw an exception when I cannot create one.
+    // no, the best thing is to have an option, and my logic exists only when the 
+    // option is Some[Config]
     val parsedArgs: Config = getConfig(args)
     val groups = parseGroupsConfig(parsedArgs.config)
     val processGroupAddress = groups(parsedArgs.roleName).getAddress
@@ -52,6 +54,8 @@ object Main {
                                             parsedArgs.roleName + "-" + parsedArgs.id)
       case "proposer" => paxosSystem.actorOf( Proposer.props(parsedArgs.id, communicationManager), 
                                               parsedArgs.roleName + "-" + parsedArgs.id)
+      case "acceptor" => paxosSystem.actorOf(Acceptor.props(parsedArgs.id, communicationManager),
+        parsedArgs.roleName + "-" + parsedArgs.id)
       case a => throw new RuntimeException("Invalid process role: " + a) 
     }
   }
