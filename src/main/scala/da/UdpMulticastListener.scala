@@ -85,15 +85,20 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
           
         case `phase1B` =>
           log.info(" sending to proposer from listener through comm. manager: " + body)
-          val (rnd, v_rnd) = { val array = body.split(separator)
-                                         ( array(0).toLong, array(1).toLong) }
-          communicationManager ! Phase1B(rnd, v_rnd)
+          val rnd = body.toLong
+          communicationManager ! Phase1B(rnd)
+          
+        case `phase2A` => //(c_rnd, seq, uuid, msgBody)
+          log.info(" sending to acceptor through comm. manager: " + body)
+          val (c_rnd, seq, uuid, msgBody) = {val array = body.split(separator)
+                                              (array(0).toLong, array(1).toLong, UUID.fromString(array(2)), array(3))}
+          communicationManager ! Phase2A(c_rnd, seq, uuid, msgBody)
           
         case `heartBeat` =>
           log.info(" sending heartbeat to other proposers ")
           communicationManager ! IncomingHeartBeat(body.toLong)
           
-        case unkown => log.info("Unkonwn header! " + unkown)
+        case unknown => log.info("Unkonwn header! " + unknown)
       }
        
     case Udp.Unbind  => socket ! Udp.Unbind

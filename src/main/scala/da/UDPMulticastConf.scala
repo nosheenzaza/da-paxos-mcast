@@ -26,7 +26,7 @@ object UDPMulticastConf {
 
   final case class MulticastGroup(group: InetAddress, port:Int) extends SocketOptionV2 {
     override def afterBind(s: DatagramSocket) {
-      
+      // TODO just add the interface from a parameter and add a nullness check!!
       // TODO I need to add the following to my routing table so that 
       // multicast works regardless of the current ip address! 
       // sudo route add -net 239.0.0.1 default

@@ -33,6 +33,7 @@ object UdpHeaders {
   val inputMessage = "INPUT"
   val phase1A = "1A"
   val phase1B = "1B"
+  val phase2A = "2A"
   val heartBeat = "H"
   val incomingHeartBeat = "HI"
 }
@@ -64,7 +65,7 @@ class CommunicationManager( address: InetAddress,
   
   implicit val timeout = Timeout(5 seconds)
   
-  val udpListener = system.actorOf(UdpMulticastListener.props(self, address, port, groups))
+  val udpListener = system.actorOf(UdpMulticastListener.props(self, address, port, groups), "udp-receiver")
   val manager = IO(Udp)  
   
   // TODO I am worried that if I send the request to process myself beforehand, it will be dropped,
@@ -106,15 +107,17 @@ class CommunicationManager( address: InetAddress,
   def proposerRouter(proposer: ActorRef, send: ActorRef): Receive = {
     case inputValue @InputValue(_,_) => proposer ! inputValue
     case a1 @ Phase1A(seq) => send ! Udp.Send( ByteString (phase1A + separator + seq), groups("acceptor") )
-    case b1 @ Phase1B(rnd, v_rnd) => proposer ! b1
+    case b1 @ Phase1B(rnd) => proposer ! b1
+    case a2 @ Phase2A(c_rnd, seq, uuid, msgBody) => send ! Udp.Send( ByteString (phase2A + separator + c_rnd + separator + seq + separator + uuid + separator + msgBody), groups("acceptor") )
     case h @ HeartBeat(round) => send ! Udp.Send(ByteString (heartBeat + separator + round), groups("proposer"))
     case hi @ IncomingHeartBeat(round) => proposer ! hi
   }
   
   def acceptorRouter(acceptor: ActorRef, send: ActorRef): Receive = {
     case a1 @ Phase1A(_) => acceptor ! a1
-    case b1 @ Phase1B(rnd, v_rnd) =>
+    case b1 @ Phase1B(rnd) =>
       log.info("Sending phase 1B to proposers from comm. manager")
-      send ! Udp.Send(ByteString (phase1B + separator + rnd + separator + v_rnd), groups("proposer"))
+      send ! Udp.Send(ByteString (phase1B + separator + rnd), groups("proposer"))
+    case a2 @ Phase2A(c_rnd, seq, uuid, msgBody) => acceptor ! a2
   }
 }

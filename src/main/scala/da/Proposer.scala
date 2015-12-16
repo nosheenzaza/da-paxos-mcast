@@ -58,39 +58,68 @@ object Proposer {
    * will realize this is the case and stop broadcasting, which means there will be a hopefully
    * short period of time where there are too many messages broadcast, but whatever, safety
    * will be guaranteed.
+   * 
+   * It is important to think about critical message loss paths. I do not care about message loss 
+   * in actors residing at the same virtual machine. because (TODO put a link). Critical paths are
+   * between different processes exchanging UDP messages. For those, we use persistent actors, these can guarantee
+   * AtLeastOne delivery, which means there can be duplicates, but the actor will keep attempting to send
+   * a message until it is delivered. 
+   * 
+   * The general philosophy for message loss is: the goal of confirmation is stopping message retries. The confirmer
+   * will "know" that the confirmee learnt the ack by the confirmee shutting up, as long as the confirmee does 
+   * not shut up, we just keep sending confirmations, if the number of confirmations grows too large, we show a warning
+   * that some process may be dead. Note that, it is possible to skil intermediate messages 
+   * (e.g the count of confirmations) and then just ignore them if they were sent but not needed. 
+   * Example interactions:
+   * 1) send phase1A, if no heartbeat starts, send it again.
+   * 2) send phase1B from acceptor, in case we get another request, sent again, no need to track these.
+   * 3) propose a value, if no majority reply is obtained within a certain time, propose again. key is is keeping state.
+   *  Note how the acceptors do not need to resend messages, they are not the askers. seems like only the asker does.
+   * 4) learners, on any receive timeout, will request the current sequence number from proposers. proposer will send that
+   * or decide on it, and  send it.
+   * 5) clients, on any timeout, will scan their message list and resend all values not yet decided.
+   * 
+   * We can see that the proposer has the most detailed message loss handling, which is natural as it is the server.
+   * Note that we do not need to do anything special if a proposer crashes. the other listerenrs will repeat asking for what
+   * they need, and the algorithm, along with correct unique ids will handle guaranteeing safety.
+   * Note that the only case the proposer is an asker, is when it asks the acceptors for a message. then at its own
+   * heartbeat, it will resend the commands not responded to. 
    */
-  
-  trait ProposerState
-  case object InitState extends ProposerState
-  case class WaitingLeaderDecision(replyCount: Int, dataSet: Set[Long]) extends ProposerState
-  case class Leader(heart: ActorRef) extends ProposerState
-  case class Listener(heartFailure: ActorRef) extends ProposerState
-  
-  trait ValueState
-  case object NotProcessed extends ValueState
-  case object Proposed extends ValueState
-  
-  /******************    Liveness Stuff, heartbeats, failure detector...etc    ******************/
-  case class HeartBeat(round: Long)
-  case class IncomingHeartBeat(round: Long)
-  case object StopBeats
-  val heartBeatInterval = 3 seconds
-  val skippedHeartbeatsCount = 3
-//  val heartbeatFailureDetector = new DeadlineFailureDetector(6 seconds, heartBeatInterval)
-  
-  
-  // TODO maybe it is more elegant to put the rule for encoding 
-  // and decoding as methods of message case objects
-  // and then just invoke them at comm. manager and UDP listener.
-  case class InputValue(id: UUID, value: String)
-  case class Phase1B(rnd: Long, v_rnd:Long)
-  
-  def nAcceptors = 3
-  def props(id:Int, commManager: ActorRef) =
-    Props( new Proposer(id, 2, commManager))
-}
-
-// TODO will the grader ensure that, say proposers, acceptors and learners run before clients and that their UDP 
+   /*
+    * How do we use paxos to order messages?
+    * We create a paxos round to agree on the message assigned to a sequence number. That round is identified
+    * by that sequence number itself. The questions here are:
+    *   1) How do we know that a unique message is assigned and so it is not assigned again to another sequence?
+    *   Because the sent decision for the round includes the id of the message. so other than storing 
+    *   the decision, we also mark the message as used or something. This should be enough, we need to ensure though
+    *   that in case of failure, the change to both is consistent, this can be easily asserted because 
+    *   
+    * How do we handle assigning duplicates or not assignign messages to rounds?
+    * The answer is: WE DON'T CARE (at least not in the paxos protocol)
+    * 
+    * Only thing paxos cares about and is ensured here is: same values observed at each participant.
+    * 
+    * Additional thing we (care?) about are:
+    *  1) No input remains un-assigned: This we can do best-effort for at clients. , as long
+    *  as the client does not learn about a certain value, it keeps retrying to send. From
+    *  discussions with leonardo this seems enough.
+    *  2) No input is assigned more than once: This can be verified at the learners, before printing
+    *  a certain sequence, verify that the bundled input was not printed before. From paxos propoerties,
+    *  it is guaranteed that all learners will drop duplicate values in the same manner, and the final
+    *  output will be identical.
+    *  
+    *  The nice thing is that the sequence number being agreed on can be local to the proposer, and paxos guarantees 
+    *  that no one sequence is assigned multiple times. The thing is
+    *  1) we are agreeing on making a sequence number AND a message.
+    *  
+    *  So what if a late leader re-proposes different values for already printed sequences? and THESE 
+    *  arrive at another late Learner??? I think a quorum of acceptors must remember what rounds
+    *  were decided and then by paxos properties the same value will be chosen. This is also why it is safe to 
+    *  send the value directly from the acceptors to learners! because of the leader did not receive before
+    *  enough acks, it would have never been able to send a value in the first place!!!!
+    * 
+    */
+  // TODO will the grader ensure that, say proposers, acceptors and learners run before clients and that their UDP 
 // channel processors are ready?
 // or do we have to take care of that? I think we need to take care of that
 // easiest way to handle that is to add a please wait message or something... then of course the 
@@ -101,7 +130,7 @@ object Proposer {
 // receives concerning it. 
 
 /*
- * I am not sure how to made the reliable broadcast fit in here, I believe I can use the info field of the map
+ * I am not sure how to make the reliable broadcast fit in here, I believe I can use the info field of the map
  * as an indicator of the message being r-delivered, a-delivered or what. I think the diff between my 
  * algorithm and that of the atomic broadcast will be that I agree on sequence numbers, not sequence of messages,
  * which should be the same basically. 
@@ -135,19 +164,69 @@ object Proposer {
  * that the value it proposed was learnt, it proposes it again, then if a decision was made we never decide on it again. If a client crashes though, 
  * it may or may not be the case that a value it proposed will ever be learned. But this does not matter.
  */
+  
+  sealed trait ProposerState
+  case object InitState extends ProposerState
+  case class WaitingLeaderDecision(replyCount: Int, dataSet: Set[Long]) extends ProposerState
+  case class Leader(heart: ActorRef, nextSeq: Long) extends ProposerState
+  case class Listener(heartFailure: ActorRef) extends ProposerState
+  
+  sealed trait ValueState
+  case object NotAssigned extends ValueState
+  case object Assigned extends ValueState // the proposal of a seq assigned this value is sent to acceptors
+  case object Bound extends ValueState // this proposal was accepted and now time to send it to learners. 
+  
+  
+  sealed trait SeqState
+  case object NotProcessed extends SeqState // this sequence value never had a round
+  case class Proposed(uuid: UUID) extends SeqState // this sequence value was assigned this message and proposed
+  // TODO this must be different if there are more than 3 acceptors 
+  case class AcceptedOnce(dataReceived: (Long, UUID, String)) extends SeqState // Set (v_rnd, value_id, value)
+  case class Learned(uuid: UUID, value: String) extends SeqState // this sequence value was accepted and it being taught to learners
+  // Note how UUID is present here too, becauses it is possible that the value assigned differes from that proposed.
+  // TODO make sure you remove the assignment if the returned UUID is different! 
+  
+  
+  
+  /******************    Liveness Stuff, heartbeats, failure detector...etc    ******************/
+  case class HeartBeat(round: Long)
+  case class IncomingHeartBeat(round: Long)
+  case object StopBeats
+  val heartBeatInterval = 3 seconds
+  val skippedHeartbeatsCount = 3
+//  val heartbeatFailureDetector = new DeadlineFailureDetector(6 seconds, heartBeatInterval)
+  
+  
+  // TODO maybe it is more elegant to put the rule for encoding 
+  // and decoding as methods of message case objects
+  // and then just invoke them at comm. manager and UDP listener.
+  case class InputValue(id: UUID, value: String)
+  case class Phase1B(rnd: Long)
+  case class Phase2B(rnd: Long, seq: Long, v_rnd: Long, v_id: UUID, v_val: String)
+  
+  def nAcceptors = 3
+  
+  val seqStart = 0
+  
+  def props(id:Int, commManager: ActorRef) =
+    Props( new Proposer(id, 2, commManager))
+}
+
+
  
 class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participant(id, commManager) with ActorLogging {
   import context.system
   import CommunicationManager._
   import Proposer._
   import Acceptor._
+  import Learner._
   
   commManager ! Init
  
   // TODO this andThen is not working
   override def receive =  PartialFunction[Any, Unit]{
     case CommunicationManagerReady => log.info("Proposer is ready to process inputs from Clients")
-    context.become( paxosImpl(InitState, Map(), id) )
+    context.become( paxosImpl(InitState, Map(), Map(), id) )
   } andThen super.receive
   
   /*
@@ -156,12 +235,9 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
    */
   def paxosImpl(
       roleState: ProposerState,
-      state: Map[UUID, (String, ValueState)],
+      msgState: Map[UUID, (String, ValueState)],
+      seqState: Map[Long, SeqState], // seq ->SeqState
       c_rnd: Long) // Largest seen round number
-//      c_val: String = null,
-//      rnd: Long = 0, 
-//      v_rnd: Long = 0,  
-//      v_val:String = null)
   : Receive = {
     
     case InputValue(uuid, msgBody) =>
@@ -181,7 +257,8 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
           context.become(
             paxosImpl(
               WaitingLeaderDecision(0, Set()),
-              state + (uuid -> (msgBody, NotProcessed ) ),
+              msgState + (uuid -> (msgBody, NotAssigned ) ),
+              seqState,
               nextLargestRound ))
               
         case WaitingLeaderDecision(_,_) =>
@@ -189,24 +266,27 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
            context.become(
             paxosImpl(
               roleState,
-              state + (uuid -> (msgBody, NotProcessed) ), 
+              msgState + (uuid -> (msgBody, NotAssigned) ), 
+              seqState,
               c_rnd))
               
-        case Leader(heart) => 
-          log.info("Received new input as a leader. ")
+        case Leader(heart, seq) => 
+          log.info("Received new input as a leader from "+ sender)
           context.become(
             paxosImpl(
-              roleState,
-              state + (uuid -> (msgBody, Proposed) ), 
+              Leader(heart, seq + 1),
+              msgState + (uuid -> (msgBody, Bound) ), 
+              seqState + (seq -> Proposed(uuid) ),
               c_rnd))
-              //TODO actually propose here to acceptors
+          log.info(" Bound seq to msg and now sending " + seq + " -> " + msgBody )   
+              commManager ! Phase2A(c_rnd, seq, uuid, msgBody)
               
+        // TODO I can add messages here as well instead of making clients resend
         case Listener(_) => 
-          log.info("Received new input as a listener. Checking it exists and forwarding...")
-          
+          log.info("Received new input as a listener. Checking it exists and forwarding...")     
       }
       
-    case Phase1B(rnd, v_rnd) =>
+    case Phase1B(rnd) =>
       roleState match {
         /*
          * What if we never get acknowledgements because another leader was faster and he got his acks and we never 
@@ -232,8 +312,9 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
             if(replyCount < nAcceptors - 1) { // still need replies
               context.become(
                   paxosImpl(
-                      WaitingLeaderDecision(replyCount + 1, dataSet + (v_rnd)),
-                      state,
+                      WaitingLeaderDecision(replyCount + 1, dataSet + (rnd)),
+                      msgState,
+                      seqState,
                       c_rnd ))
             }
             else { // we got enough acks
@@ -253,14 +334,78 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
               println("Got enough acks, becoming the leader...")
               context.become(
                 paxosImpl(
-                  Leader(beginHeartBeats(c_rnd)),
-                  state,
+                  Leader(beginHeartBeats(c_rnd), seqStart), //TODO if you want to synchronize with older leaders, you should not put 0 here but check the seq state.
+                  msgState,
+                  seqState,
                   c_rnd))
+             // resend all non-processed messages.
+             msgState.filter(x => x._2._2 == NotAssigned ).foreach( x => self ! InputValue(x._1, x._2._1))
               
             }
           }
         case a => log.info("Received late Leader election message")
       }
+      
+    case Phase2B(rnd, seq, v_rnd, v_id, v_val) =>
+      roleState match {
+        case Leader(heart, currentSeq) =>
+          if(rnd == c_rnd) {// if this message is actually to me
+            // check if I reached the number of needed messages for the seq
+            // TODO will there always be a value here? it should exist I guess as I only consider replies to myself
+            val seqInfo = seqState(seq)
+            seqInfo match {
+              case Proposed(_) => 
+                context.become(
+                paxosImpl(
+                  Leader(heart, currentSeq),
+                  msgState,
+                  seqState + (seq -> AcceptedOnce(v_rnd, v_id, v_val)), // I keel v_val in case the next leader did not have it.
+                  c_rnd))
+              case AcceptedOnce((pre_vrnd, pre_vid, pre_v_val)) => // we got two replies which is what we need
+                /*
+                 * Because of stop failure, we are safe to accept any two proposal and taking the once with
+                 * the most recent v_val, because an old acceptor coming back to live and ruining things
+                 * cannot happen, we need to be careful though to store the value accepted if it differs 
+                 * from what we had. I should not care about higher values, as they are not to me but
+                 * the real leader not me and it will take care of things and I will know that later.
+                 * 
+                 * Any reply with a number less that mine indicates I got a value proposed by an older leader
+                 * and I must accept that. Only if both replies match my proposal I can start sending to learners.
+                 */
+                if (v_rnd == c_rnd && pre_vrnd == c_rnd) { // value I proposed can go! update message and seq states
+                  context.become(paxosImpl(
+                    Leader(heart, currentSeq), // no need to change seq here.
+                    msgState + (v_id -> (v_val, Bound)), // a marker so we do not use it again, but maybe I can delete it, no i wont so I know it is used if client sends again
+                    seqState + (seq -> Learned(v_id, v_val)),
+                    c_rnd))
+                    
+                    commManager ! Learn(seq, v_id, v_val) // Must send to proposers and learners.
+                }
+                else { // otherwise select stored value with largest timestamp returned from acceptors.
+                  log.info("proposed value not accepted but an older one") // must not happen if no leader failure
+                  // val oldMessageState = msgState(v_id)
+                  val (selected_id, selected_val) = if(pre_vrnd > v_rnd) (pre_vid, pre_v_val) else (v_id, v_val) 
+                  
+                  context.become(paxosImpl(
+                    Leader(heart, currentSeq), 
+                    msgState + (selected_id -> (selected_val, Bound)), // a marker so we do not use it again, but maybe I can delete it, no i wont so I know it is used if client sends again
+                    seqState + (seq -> Learned(selected_id, selected_val)),
+                    c_rnd))
+                    
+                    commManager ! Learn(seq, selected_id, selected_val)
+                }
+
+                                
+              case _ => Unit // we don't care otherwise
+            }
+          }
+        case other => log.info("received 2B message when not leader " + other)  
+          
+      }
+      
+      
+      
+      
 
     /*
      * TODO what if I get a heartbeat while I am still waiting for decisions? should I also 
@@ -285,12 +430,13 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
       if (round > c_rnd) {
         log.info("Detected real leader, becoming listener whatever I was doing and stopping beats. I was " + roleState)
         roleState match {
-          case Leader(heart) =>
+          // one can be more effecient and hand over the current sequence and sequence state, TODO maybe I do that later if there is time. 
+          case Leader(heart, seq) =>
             heart ! StopBeats
-            context.become(paxosImpl(Listener(beginFailureDetector), state, round)) // remember the round that beat me so I can generate something higher.
+            context.become(paxosImpl(Listener(beginFailureDetector), msgState, seqState, round)) // remember the round that beat me so I can generate something higher.
           case WaitingLeaderDecision(_,_) => 
-            context.become(paxosImpl(Listener(beginFailureDetector), state, round)) 
-          case _ => context.become(paxosImpl(Listener(beginFailureDetector), state, round)) // I think this is how it should be, but not sure.
+            context.become(paxosImpl(Listener(beginFailureDetector), msgState, seqState, round)) 
+          case _ => context.become(paxosImpl(Listener(beginFailureDetector), msgState, seqState, round)) // I think this is how it should be, but not sure.
         }
       }
       
@@ -304,7 +450,8 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
           context.become(
             paxosImpl(
               WaitingLeaderDecision(0, Set()),
-              state,
+              msgState,
+              seqState,
               nextLargestRound ))
       
     case a => log.info("Message not processed " + a) 
@@ -321,7 +468,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
       override def postStop() = beat.cancel()
     }
     
-    val proposerHeart = context.actorOf(Props(new ProposerHeart()))   
+    val proposerHeart = context.actorOf(Props(new ProposerHeart()), self.path.name + "-heart")   
     proposerHeart
   }
   
@@ -339,7 +486,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
         case IncomingHeartBeat(_) => log.info("Some leader is alive")
       }
     }
-    val heartFailure = context.actorOf(Props(new HeartFailureDetector()))   
+    val heartFailure = context.actorOf(Props(new HeartFailureDetector()), self.path.name + "-detector" )   
     heartFailure
   }
   

@@ -21,6 +21,7 @@ import scala.language.postfixOps
 
 import UDPMulticastConf._
 
+// TODO ask is it ok if safety is violated when more than f acceptors fail?
 /**
  * Each role is a member of a multicast group, and can receive messages from the group.
  * To send messages though, the client needs to implement simple UDP sending, and have
@@ -48,13 +49,15 @@ object Main {
     // Client, listener, proposer or learner depending on the argument sent to the process
     // TODO I think this reflection trick is ugly, will change it later
     // TODO be sure tha neverything is initialized correctly before starting the communication
-    val communicationManager = paxosSystem.actorOf( CommunicationManager.props(processGroupAddress, processRolePort, groups) )
+    val communicationManager = paxosSystem.actorOf( CommunicationManager.props(processGroupAddress, processRolePort, groups), "comm-manager" )
     val participant = parsedArgs.roleName match {
       case "client" => paxosSystem.actorOf( Client.props(parsedArgs.id, communicationManager, inputValues.toList),
                                             parsedArgs.roleName + "-" + parsedArgs.id)
       case "proposer" => paxosSystem.actorOf( Proposer.props(parsedArgs.id, communicationManager), 
                                               parsedArgs.roleName + "-" + parsedArgs.id)
       case "acceptor" => paxosSystem.actorOf(Acceptor.props(parsedArgs.id, communicationManager),
+        parsedArgs.roleName + "-" + parsedArgs.id)
+      case "learner" => paxosSystem.actorOf(Learner.props(parsedArgs.id, communicationManager),
         parsedArgs.roleName + "-" + parsedArgs.id)
       case a => throw new RuntimeException("Invalid process role: " + a) 
     }

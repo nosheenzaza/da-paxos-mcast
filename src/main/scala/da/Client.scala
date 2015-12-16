@@ -18,11 +18,11 @@ import UDPMulticastConf._
 
 
 object Client {
-  trait MessageState
+  sealed trait MessageState
   case object Added extends MessageState // means message was just added 
-  case object Delivered extends MessageState
-  case object Failed extends MessageState
-  case class  Retried(nTimes: Int) extends MessageState
+  case object Learned extends MessageState
+//  case object Failed extends MessageState
+//  case class  Retried(nTimes: Int) extends MessageState
   
   case class ToSend(v: String, rest: List[String])
   
