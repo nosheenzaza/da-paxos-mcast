@@ -309,7 +309,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
           if (rnd == c_rnd && replyCount < nAcceptors) { // means I did not get a message broadcast to another proposer
             // From the above condition, I can be smart and also keep count of other broadcasted Phase1B messages, aimed at other proposers 
             // I can count those, but no this will not work, because it could be that the other proposer did not get them and only I did.
-            if(replyCount < nAcceptors - 1) { // still need replies
+            if(replyCount + 1 < nAcceptors - 1) { // still need replies
               context.become(
                   paxosImpl(
                       WaitingLeaderDecision(replyCount + 1, dataSet + (rnd)),
@@ -331,7 +331,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
               * I need to handle that somehow. Maybe at the step after I will 
               * retreat the current leader.
               */
-              println("Got enough acks, becoming the leader...")
+              println("Got enough acks, becoming the leader..." + replyCount)
               context.become(
                 paxosImpl(
                   Leader(beginHeartBeats(c_rnd), seqStart), //TODO if you want to synchronize with older leaders, you should not put 0 here but check the seq state.
@@ -470,7 +470,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
       override def postStop() = beat.cancel()
     }
     
-    val proposerHeart = context.actorOf(Props(new ProposerHeart()), self.path.name + "-heart")   
+    val proposerHeart = context.actorOf(Props(new ProposerHeart())) //, self.path.name + "-heart-" + id)   
     proposerHeart
   }
   
@@ -488,7 +488,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
         case IncomingHeartBeat(_) => log.info("Some leader is alive")
       }
     }
-    val heartFailure = context.actorOf(Props(new HeartFailureDetector()), self.path.name + "-detector" )   
+    val heartFailure = context.actorOf(Props(new HeartFailureDetector())) //, self.path.name + "-detector-" + id)   
     heartFailure
   }
   

@@ -35,6 +35,7 @@ object UdpHeaders {
   val phase1B = "1B"
   val phase2A = "2A"
   val phase2B = "2B"
+  val learn = "L"
   val heartBeat = "H"
   val incomingHeartBeat = "HI"
 }
@@ -52,6 +53,7 @@ object CommunicationManager {
   }
 }
 
+// TODO test with all processes using the same ip address
 class CommunicationManager( address: InetAddress,
                             port: Int, 
                             groups: Map[String, InetSocketAddress])
@@ -61,6 +63,7 @@ class CommunicationManager( address: InetAddress,
   import context.system
   import Proposer._
   import Acceptor._
+  import Learner._
   import UdpHeaders._
   import CommunicationManager._
   
@@ -95,6 +98,10 @@ class CommunicationManager( address: InetAddress,
           log.info("becoming an acceptor router "); 
           context.become(acceptorRouter(participantSender, sender))
           participantSender ! CommunicationManagerReady
+        case _ if participantSender.path.name.contains("learner") => 
+          log.info("becoming a learner router "); 
+          context.become(learnerRouter(participantSender, sender))
+          participantSender ! CommunicationManagerReady
       }     
   }
   
@@ -110,8 +117,9 @@ class CommunicationManager( address: InetAddress,
     case a1 @ Phase1A(seq) => send ! Udp.Send( ByteString (phase1A + separator + seq), groups("acceptor") )
     case b1 @ Phase1B(rnd) => proposer ! b1
     case a2 @ Phase2A(c_rnd, seq, uuid, msgBody) => send ! Udp.Send( ByteString (phase2A + separator + c_rnd + separator + seq + separator + uuid + separator + msgBody), groups("acceptor") )
-    case b2 @ Phase2B(c_rnd, seq, v_rnd, v_id, stored_v_val) => proposer ! b2 
-    case h @ HeartBeat(round) => send ! Udp.Send(ByteString (heartBeat + separator + round), groups("proposer"))
+    case b2 @ Phase2B(c_rnd, seq, v_rnd, v_id, stored_v_val) => proposer ! b2
+    case l  @ Learn(seq, selected_id, selected_val) => send ! Udp.Send( ByteString (learn + separator + seq + separator + selected_id + separator + selected_val), groups("learner") )
+    case h  @ HeartBeat(round) => send ! Udp.Send(ByteString (heartBeat + separator + round), groups("proposer"))
     case hi @ IncomingHeartBeat(round) => proposer ! hi
   }
   
@@ -125,4 +133,8 @@ class CommunicationManager( address: InetAddress,
                                                                                         c_rnd + separator + seq + separator + 
                                                                                         v_rnd + separator + v_id + separator + stored_v_val), groups("proposer"))
   }
+  
+   def learnerRouter(learner: ActorRef, send: ActorRef): Receive = {
+     case l  @ Learn(_,_,_) => learner ! l 
+   }
 }

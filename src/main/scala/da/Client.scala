@@ -16,7 +16,7 @@ import java.net.InetSocketAddress
 
 import UDPMulticastConf._
 
-
+// TODO fix the empty line exception issue. 
 object Client {
   sealed trait MessageState
   case object Added extends MessageState // means message was just added 

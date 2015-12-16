@@ -48,6 +48,7 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
   import context.system
   import Proposer._
   import Acceptor._
+  import Learner._
   import UdpHeaders._
   
   val group = MulticastGroup(address, port )
@@ -68,7 +69,7 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
   def ready(socket: ActorRef): Receive = {
     case Udp.Received(data, remote) =>
       val processed = data.utf8String
-      log.info(" recieved data " + processed)
+//      log.info(" recieved data " + processed)
       val (header, body) = { val array = processed.split(separator, 2)
                              ( array(0), array(1) ) }
       
@@ -100,6 +101,13 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
             { val array = body.split(separator)
               (array(0).toLong, array(1).toLong, array(2).toLong, UUID.fromString(array(3)), array(4))}
           communicationManager ! Phase2B(c_rnd, seq, v_rnd, v_id, stored_v_val)
+          
+        case `learn` => 
+//          log.info(" sending learned val to learner through comm. manager: " + body)
+          val (seq, selected_id, selected_val) = 
+            { val array = body.split(separator)
+              (array(0).toLong, UUID.fromString(array(1)), array(2))}          
+          communicationManager ! Learn(seq, selected_id, selected_val)
           
         case `heartBeat` =>
           log.info(" sending heartbeat to other proposers ")
