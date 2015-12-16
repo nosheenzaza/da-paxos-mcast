@@ -34,6 +34,7 @@ object UdpHeaders {
   val phase1A = "1A"
   val phase1B = "1B"
   val phase2A = "2A"
+  val phase2B = "2B"
   val heartBeat = "H"
   val incomingHeartBeat = "HI"
 }
@@ -109,6 +110,7 @@ class CommunicationManager( address: InetAddress,
     case a1 @ Phase1A(seq) => send ! Udp.Send( ByteString (phase1A + separator + seq), groups("acceptor") )
     case b1 @ Phase1B(rnd) => proposer ! b1
     case a2 @ Phase2A(c_rnd, seq, uuid, msgBody) => send ! Udp.Send( ByteString (phase2A + separator + c_rnd + separator + seq + separator + uuid + separator + msgBody), groups("acceptor") )
+    case b2 @ Phase2B(c_rnd, seq, v_rnd, v_id, stored_v_val) => proposer ! b2 
     case h @ HeartBeat(round) => send ! Udp.Send(ByteString (heartBeat + separator + round), groups("proposer"))
     case hi @ IncomingHeartBeat(round) => proposer ! hi
   }
@@ -119,5 +121,8 @@ class CommunicationManager( address: InetAddress,
       log.info("Sending phase 1B to proposers from comm. manager")
       send ! Udp.Send(ByteString (phase1B + separator + rnd), groups("proposer"))
     case a2 @ Phase2A(c_rnd, seq, uuid, msgBody) => acceptor ! a2
+    case Phase2B(c_rnd, seq, v_rnd, v_id, stored_v_val) => send ! Udp.Send( ByteString (phase2B + separator + 
+                                                                                        c_rnd + separator + seq + separator + 
+                                                                                        v_rnd + separator + v_id + separator + stored_v_val), groups("proposer"))
   }
 }

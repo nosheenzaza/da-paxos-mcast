@@ -45,7 +45,7 @@ class Acceptor(id: Int, commManager: ActorRef) extends Participant(id, commManag
         commManager ! Phase1B(c_rnd)    
       }
     case Phase2A(c_rnd, seq, new_vid, new_v_val) =>
-      log.info("Processing " + c_rnd + " " + seq + " " + new_vid)
+      log.info("Processing proposed value " + c_rnd + " " + seq + " " + new_vid)
       // I believe c_rnd must never be greater than rnd, the else part below is to verify
       // not true, I could be a later acceptor not aware of previous leaders, due to message loss, it still has to reply though as usual. HOWEVER,
       // I also believe this means that this replica has to upgrade to the new leader, it must be a leader that sent this message based on previous

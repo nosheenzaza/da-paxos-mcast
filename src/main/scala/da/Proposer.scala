@@ -379,6 +379,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
                     seqState + (seq -> Learned(v_id, v_val)),
                     c_rnd))
                     
+                    log.info("Proposer value itself accepted. Sending learn from propsoer: " + seq + " " + v_val);
                     commManager ! Learn(seq, v_id, v_val) // Must send to proposers and learners.
                 }
                 else { // otherwise select stored value with largest timestamp returned from acceptors.
@@ -392,6 +393,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
                     seqState + (seq -> Learned(selected_id, selected_val)),
                     c_rnd))
                     
+                    log.info("A previously stored value accepted. Sending learn from propsoer: " + seq + " " + selected_val);
                     commManager ! Learn(seq, selected_id, selected_val)
                 }
 

@@ -89,10 +89,17 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
           communicationManager ! Phase1B(rnd)
           
         case `phase2A` => //(c_rnd, seq, uuid, msgBody)
-          log.info(" sending to acceptor through comm. manager: " + body)
+          log.info(" sending phase2A to acceptor through comm. manager: " + body)
           val (c_rnd, seq, uuid, msgBody) = {val array = body.split(separator)
                                               (array(0).toLong, array(1).toLong, UUID.fromString(array(2)), array(3))}
           communicationManager ! Phase2A(c_rnd, seq, uuid, msgBody)
+          
+        case `phase2B` => //(c_rnd, seq, v_rnd, v_id, stored_v_val)
+          log.info(" sending phase2B to proposer through comm. manager: " + body)
+          val (c_rnd, seq, v_rnd, v_id, stored_v_val) = 
+            { val array = body.split(separator)
+              (array(0).toLong, array(1).toLong, array(2).toLong, UUID.fromString(array(3)), array(4))}
+          communicationManager ! Phase2B(c_rnd, seq, v_rnd, v_id, stored_v_val)
           
         case `heartBeat` =>
           log.info(" sending heartbeat to other proposers ")
