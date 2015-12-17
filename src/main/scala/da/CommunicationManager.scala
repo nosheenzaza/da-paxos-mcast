@@ -38,6 +38,7 @@ object UdpHeaders {
   val learn = "L"
   val heartBeat = "H"
   val incomingHeartBeat = "HI"
+  val syncRequest = "S"
 }
 /**
  * TODO I think I will separate the sender part, put it with the listener and hide both behind a single manager actor
@@ -67,10 +68,9 @@ class CommunicationManager( address: InetAddress,
   import UdpHeaders._
   import CommunicationManager._
   
-  implicit val timeout = Timeout(5 seconds)
-  
   val udpListener = system.actorOf(UdpMulticastListener.props(self, address, port, groups), "udp-receiver")
   val manager = IO(Udp)  
+  
   
   // TODO I am worried that if I send the request to process myself beforehand, it will be dropped,
   // check how to fix this (if it is broken)
@@ -108,33 +108,47 @@ class CommunicationManager( address: InetAddress,
   def clientRouter(client: ActorRef, send: ActorRef): Receive = {
     case inputValue @InputValue(uuid, msgBody) =>
       log.info(" recieved input value " + uuid + " " + msgBody)
-      log.info("sending message to Proposer at" + groups("proposer"))
       send ! Udp.Send(ByteString( inputMessage + separator + uuid + separator + msgBody ), groups("proposer"))
+    case l  @ Learn(_,_,_) => client ! l
+      
   }
   
   def proposerRouter(proposer: ActorRef, send: ActorRef): Receive = {
     case inputValue @InputValue(_,_) => proposer ! inputValue
     case a1 @ Phase1A(seq) => send ! Udp.Send( ByteString (phase1A + separator + seq), groups("acceptor") )
-    case b1 @ Phase1B(rnd) => proposer ! b1
+    case b1 @ Phase1B(id, rnd) => log.info("sending 1B from manager to proposer!"); proposer ! b1
     case a2 @ Phase2A(c_rnd, seq, uuid, msgBody) => send ! Udp.Send( ByteString (phase2A + separator + c_rnd + separator + seq + separator + uuid + separator + msgBody), groups("acceptor") )
-    case b2 @ Phase2B(c_rnd, seq, v_rnd, v_id, stored_v_val) => proposer ! b2
-    case l  @ Learn(seq, selected_id, selected_val) => send ! Udp.Send( ByteString (learn + separator + seq + separator + selected_id + separator + selected_val), groups("learner") )
+    case b2 @ Phase2B(acc_id, c_rnd, seq, v_rnd, v_id, stored_v_val) => proposer ! b2
+    case s  @ SyncRequest => proposer ! s
+    case l  @ Learn(seq, selected_id, selected_val) =>
+      sender match {
+        case _ if sender.path.name.contains("proposer") =>
+          val learnedToByteString = ByteString(learn + separator + seq + separator + selected_id + separator + selected_val)
+          send ! Udp.Send(learnedToByteString, groups("learner"))
+//          send ! Udp.Send(learnedToByteString, groups("proposer"))
+          send ! Udp.Send(learnedToByteString, groups("client"))
+          // TODO maybe send to  acceptors too?
+        case _ =>  proposer ! l // must be form listener otherwise, send it to proposer
+      }
+      
     case h  @ HeartBeat(round) => send ! Udp.Send(ByteString (heartBeat + separator + round), groups("proposer"))
     case hi @ IncomingHeartBeat(round) => proposer ! hi
   }
   
   def acceptorRouter(acceptor: ActorRef, send: ActorRef): Receive = {
     case a1 @ Phase1A(_) => acceptor ! a1
-    case b1 @ Phase1B(rnd) =>
+    case b1 @ Phase1B(id, rnd) =>
       log.info("Sending phase 1B to proposers from comm. manager")
-      send ! Udp.Send(ByteString (phase1B + separator + rnd), groups("proposer"))
+      send ! Udp.Send(ByteString (phase1B + separator + id + separator + rnd), groups("proposer"))
     case a2 @ Phase2A(c_rnd, seq, uuid, msgBody) => acceptor ! a2
-    case Phase2B(c_rnd, seq, v_rnd, v_id, stored_v_val) => send ! Udp.Send( ByteString (phase2B + separator + 
+    case Phase2B(acc_id, c_rnd, seq, v_rnd, v_id, stored_v_val) => send ! Udp.Send( ByteString (phase2B + separator + 
+                                                                                        acc_id + separator +
                                                                                         c_rnd + separator + seq + separator + 
                                                                                         v_rnd + separator + v_id + separator + stored_v_val), groups("proposer"))
   }
   
    def learnerRouter(learner: ActorRef, send: ActorRef): Receive = {
      case l  @ Learn(_,_,_) => learner ! l 
+     case SyncRequest => send ! Udp.Send(ByteString(syncRequest + separator + "bh"), groups("proposer"))
    }
 }

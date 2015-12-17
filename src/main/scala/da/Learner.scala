@@ -4,6 +4,10 @@ import akka.actor.{ ActorRef, ActorSystem, Props, Actor, ActorLogging }
 import akka.io.{ IO, Udp }
 import akka.io.Inet.{ SocketOption, DatagramChannelCreator, SocketOptionV2 }
 import akka.util.ByteString
+import akka.actor.ReceiveTimeout
+
+import scala.concurrent.duration._
+import scala.language.postfixOps
 
 import java.util.UUID
 
@@ -18,11 +22,12 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
   import Proposer._
   import Learner._
  
+  context.setReceiveTimeout( 5 seconds)
   commManager ! Init
   override def receive =  PartialFunction[Any, Unit]{
-    case CommunicationManagerReady => log.info("Learner is ready to process requests")
+    case CommunicationManagerReady => println("Learner is ready receive and process requests.")
     context.become( paxosImpl(seqStart, Map(), Set()) )
-    // TODO here ask a leader for the decided values to catch up with what has happened so far.
+    commManager ! SyncRequest
   } orElse super.receive
   
   
@@ -34,7 +39,7 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
     case Learn(seq, v_id, v_val) => // first print and check if there is more to be printed 
       if(seq == nextPrint) {
         val associatedValPrinted = printedMessages.contains(v_id); 
-        if (!associatedValPrinted) println(v_val) //TODO having doubts here concerning duplicate removal, I also need to skip the sequence maybe?
+        if (!associatedValPrinted) println(seq + " " + v_val) //TODO having doubts here concerning duplicate removal, I also need to skip the sequence maybe?
           
       val waitingPoint = printRest( seq + 1) // here we skip the sequence and consider it printed.
       val restofPending = removePrinted(seq + 1, waitingPoint, pending)
@@ -52,11 +57,11 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
             printedMessages + v_id
             ) )
       }
-        
+      
    def printRest(startSeq: Long): Long = {
     val possibleNext = pending.get(startSeq)
     possibleNext match {
-      case Some(value) => if (!printedMessages.contains(v_id)) println(value); printRest(startSeq + 1)
+      case Some(value) => if (!printedMessages.contains(v_id)) println(startSeq + " " + value); printRest(startSeq + 1)
       case None => startSeq
     }
   }
@@ -69,7 +74,9 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
       removePrinted(start + 1, end -1, endsRemoved )
     }
   }
-   
+  case timeout: ReceiveTimeout =>
+    // TODO very inefficient, fix later.
+     commManager ! SyncRequest  
   }
   
  

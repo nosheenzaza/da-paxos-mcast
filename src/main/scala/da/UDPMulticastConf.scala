@@ -42,7 +42,7 @@ object UDPMulticastConf {
       p.waitFor()
       val ifaceName = scala.io.Source.fromInputStream(p.getInputStream).mkString.trim
       
-      println("Multicasting on interface " + ifaceName)
+//      println("Multicasting on interface " + ifaceName)
       
       // TODO to set the interface correctly, I can cheat and use the java multicastSocket, then
       // call getInterface on it! However I think I cn 
@@ -52,7 +52,7 @@ object UDPMulticastConf {
       
       val iface = NetworkInterface.getByName(ifaceName)
       val key = s.getChannel.join(group, iface)
-      println("Membership key: " + key)
+//      println("Membership key: " + key)
     }
   }
 }

@@ -20,6 +20,6 @@ class Participant(id: Int, commManager:ActorRef) extends Actor with ActorLogging
   def receive = {
     //TODO this must be the last thing called at subclasses
     case a =>
-      println("Recieved " + a.toString() + " at "+ self)
+//      println("Recieved " + a.toString() + " at "+ self)
   }
 }

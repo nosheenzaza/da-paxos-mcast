@@ -86,8 +86,9 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
           
         case `phase1B` =>
           log.info(" sending to proposer from listener through comm. manager: " + body)
-          val rnd = body.toLong
-          communicationManager ! Phase1B(rnd)
+          val (id, rnd) = { val array = body.split(separator, 2)
+                             ( array(0).toInt, array(1).toLong ) }
+          communicationManager ! Phase1B(id, rnd)
           
         case `phase2A` => //(c_rnd, seq, uuid, msgBody)
           log.info(" sending phase2A to acceptor through comm. manager: " + body)
@@ -97,10 +98,10 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
           
         case `phase2B` => //(c_rnd, seq, v_rnd, v_id, stored_v_val)
           log.info(" sending phase2B to proposer through comm. manager: " + body)
-          val (c_rnd, seq, v_rnd, v_id, stored_v_val) = 
+          val (acc_id, c_rnd, seq, v_rnd, v_id, stored_v_val) = 
             { val array = body.split(separator)
-              (array(0).toLong, array(1).toLong, array(2).toLong, UUID.fromString(array(3)), array(4))}
-          communicationManager ! Phase2B(c_rnd, seq, v_rnd, v_id, stored_v_val)
+              (array(0).toInt, array(1).toLong, array(2).toLong, array(3).toLong, UUID.fromString(array(4)), array(5))}
+          communicationManager ! Phase2B(acc_id, c_rnd, seq, v_rnd, v_id, stored_v_val)
           
         case `learn` => 
 //          log.info(" sending learned val to learner through comm. manager: " + body)
@@ -112,6 +113,10 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
         case `heartBeat` =>
           log.info(" sending heartbeat to other proposers ")
           communicationManager ! IncomingHeartBeat(body.toLong)
+          
+        case `syncRequest` =>
+//          log.info(" sending sync request to other proposers ")
+          communicationManager ! SyncRequest
           
         case unknown => log.info("Unkonwn header! " + unknown)
       }
