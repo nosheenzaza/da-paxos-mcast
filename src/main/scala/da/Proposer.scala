@@ -232,7 +232,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
  
   // TODO this andThen is not working
   override def receive =  PartialFunction[Any, Unit]{
-    case CommunicationManagerReady => println("Proposer is ready receive and process requests.")
+    case CommunicationManagerReady => println("Proposer " + id + "  is ready receive and process requests.")
     context.become( paxosImpl(InitState, Map(), Map(), id) )
   } andThen super.receive
   
@@ -336,7 +336,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
               * I need to handle that somehow. Maybe at the step after I will 
               * retreat the current leader.
               */
-              log.info("Got enough acks, becoming the leader..." + replyCount)
+              println("Got enough acks, becoming the leader...")
               context.become(
                 paxosImpl(
                   Leader(beginHeartBeats(c_rnd), seqStart), //TODO if you want to synchronize with older leaders, you should not put 0 here but check the seq state.
@@ -450,7 +450,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
       // Note that this logic will also detect when a leader changes without the participation of the current
       // listener
       if (round > c_rnd) {
-        log.info("Detected real leader, becoming listener whatever I was doing and stopping beats. I was " + roleState)
+        println("Detected real leader, becoming listener whatever I was doing and stopping beats. I was " + roleState)
         roleState match {
           // one can be more effecient and hand over the current sequence and sequence state, TODO maybe I do that later if there is time. 
           case Leader(heart, seq) =>
@@ -464,7 +464,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
       
     // I only care when I am the listener. Otherwise I can ignore I guess
     case ReceiveTimeout =>
-      log.info("No more heartbeats detectable, start another leader election round ")
+      println("No more heartbeats detectable, start another leader election round ")
       
       val nextLargestRound = nextLargestSeq(id, nReplicas, c_rnd)
           log.info("Rounds state for " + self.path.name + " OLD: " + c_rnd + " NEW: " + nextLargestRound)

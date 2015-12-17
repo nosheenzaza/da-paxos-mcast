@@ -27,7 +27,7 @@ class Acceptor(id: Int, commManager: ActorRef) extends Participant(id, commManag
   commManager ! Init
    
   override def receive =  PartialFunction[Any, Unit]{
-    case CommunicationManagerReady => println("Acceptor is ready receive and process requests.")
+    case CommunicationManagerReady => println("Acceptor " + id + " is ready receive and process requests.")
     context.become( paxosImpl(Map(), 0) )
   } orElse super.receive
   

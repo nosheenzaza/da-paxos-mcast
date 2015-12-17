@@ -79,7 +79,7 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
    */
   override def receive = PartialFunction[Any, Unit] {
     case CommunicationManagerReady => 
-      println("Client is ready and will start sending input values")
+      println("Client " + id + " is ready and will start sending input values")
       val msgID = UUID.randomUUID()
       context.become(messageSender(Map()))
       self ! ToSend(inputs.head, inputs.tail)

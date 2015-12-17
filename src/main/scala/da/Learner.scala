@@ -25,7 +25,7 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
   context.setReceiveTimeout( 5 seconds)
   commManager ! Init
   override def receive =  PartialFunction[Any, Unit]{
-    case CommunicationManagerReady => println("Learner is ready receive and process requests.")
+    case CommunicationManagerReady => println("Learner " + id + " is ready receive and process requests.")
     context.become( paxosImpl(seqStart, Map(), Set()) )
     commManager ! SyncRequest
   } orElse super.receive
