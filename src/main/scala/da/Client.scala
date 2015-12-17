@@ -57,7 +57,7 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
   
   commManager ! Init
   
-  context.setReceiveTimeout( 1 seconds)
+  context.setReceiveTimeout( 5 seconds)
   
 //  def endpointUri = "stream:in"
 
@@ -81,39 +81,53 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
     case CommunicationManagerReady => 
       println("Client " + id + " is ready and will start sending input values")
       val msgID = UUID.randomUUID()
-      context.become(messageSender(Map()))
+      val now = System.nanoTime
+      context.become(messageSender(now, Map()))
       self ! ToSend(inputs.head, inputs.tail)
   }
   
-  def messageSender(state: Map[UUID, (InputValue, MessageState)]): Receive = {
+  def messageSender(startTime: Long, state: Map[UUID, (InputValue, MessageState)]): Receive = {
     case ToSend(input, Nil) => 
       val msgID = UUID.randomUUID()
       val msg = InputValue(msgID, input)
       commManager ! msg
-      context.become(messageSender( state +  ( msgID -> (msg, Added) ) )) 
+      context.become(messageSender(startTime, state +  ( msgID -> (msg, Added) ) )) 
 
     case ToSend(input, rest) => 
       val msgID = UUID.randomUUID()
       val msg = InputValue(msgID, input)
       commManager ! msg
-      context.become(messageSender( state +  ( msgID -> (msg, Added) ) ))
+      context.become(messageSender(startTime, state +  ( msgID -> (msg, Added) ) ))
       self ! ToSend(rest.head, rest.tail)
-      
-      case Learn(seq, v_id, v_val) =>
-        val msgWithID = state.get(v_id)
-        msgWithID match {
-          case Some((value,_)) =>// can be non because msg was confirming a value from another client
-            context.become(messageSender(
-                state + (v_id -> ((value, LearnedInput)))
-                ))
-          case None => Unit
-        }      
+
+    case Learn(seq, v_id, v_val) =>
+      val msgWithID = state.get(v_id)
+      msgWithID match {
+        case Some((value, _)) => // can be non because msg was confirming a value from another client
+          context.become(messageSender(startTime,
+            state + (v_id -> ((value, LearnedInput)))))
+            
+          val items = state.toList.filter(x => x._2._2 match {
+            case Added =>
+              true
+            case _ => false
+          })
+        val confirmedWithCurrent = items.size - 1
+        
+        val miliseconds = (System.nanoTime - startTime) / 1000000
+        val seconds = miliseconds / 1000
+        
+        if(confirmedWithCurrent == 0) { println ("all vals decided in " + miliseconds + " milliseconds " + " (" + seconds + " seconds) "); context.stop(self) }        
+        case None => Unit
+      }      
       case timeout: ReceiveTimeout =>
         // on timeout, resend everything not yet learned. 
         // TODO is this good enough or do I need a timer that would resend independant of any event?
-        state.toList.filter( x => x._2._2 match { 
+        val items = state.toList.filter( x => x._2._2 match { 
           case Added =>
             true 
-          case _ => false}).foreach(x => commManager ! x._2._1)  
+          case _ => false})          
+        items.foreach(x => commManager ! x._2._1)
+        if(items.isEmpty) println ("all vals decided in ")
   }
 }
