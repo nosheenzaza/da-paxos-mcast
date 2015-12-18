@@ -22,13 +22,8 @@ import UDPMulticastConf._
 
 // TODO fix the empty line exception issue. 
 object Client {
-  sealed trait MessageState
-  case object Added extends MessageState // means message was just added 
-  case object LearnedInput extends MessageState
-//  case object Failed extends MessageState
-//  case class  Retried(nTimes: Int) extends MessageState
   
-  case class ToSend(v: String, rest: List[String])
+  private case object SendNext
   
   def props(id:Int, commManager: ActorRef, inputs: List[String]) =
     Props( new Client(id, commManager, inputs))
@@ -57,77 +52,66 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
   
   commManager ! Init
   
-  context.setReceiveTimeout( 5 seconds)
+  context.setReceiveTimeout( 500 milliseconds)
   
-//  def endpointUri = "stream:in"
+  val maxRetry = 30
 
-  /**
-   * If all proposers are dead (no response from comm. manager in n seconds), we retry m times, if
-   * there is still no response, what can we do? maybe keep stuck of broadcast a poison pill to the system? but
-   * again this requires agreement! I think for now I will just keep trying.
-   * TODO implement the previous later
-   *
-   * TODO implement a resend mechanism later on. I need a future for each message, the good thing is that it will
-   * be non-blocking!
-   * 
-   * TODO it would be good to find a way to make a deterministic choice regarding the order of messages from 
-   * clients, maybe this is why it is better to assign a sequence number here not at the proposer actually.
-   * This way, if a proposer dies, I would only need to resent form the clients since I do not care
-   * about the crashing of a client, as I can just ignore the rest of its messages, or maybe store it on
-   * stable storage. The TA mentioned something about killing the clients, so maybe better add that anyway,
-   * and only remove the values when I know that the value is learnt.  
-   */
   override def receive = PartialFunction[Any, Unit] {
     case CommunicationManagerReady => 
       println("Client " + id + " is ready and will start sending input values")
       val msgID = UUID.randomUUID()
       val now = System.nanoTime
-      context.become(messageSender(now, Map()))
-      self ! ToSend(inputs.head, inputs.tail)
+      context.become(messageSender(now, Map(), inputs))
+      self ! SendNext
+//    case timeout: ReceiveTimeout => 
+//      println("Trying again to prepare communication manager")
+//      commManager ! Init     
   }
   
-  def messageSender(startTime: Long, state: Map[UUID, (InputValue, MessageState)]): Receive = {
-    case ToSend(input, Nil) => 
+  /**
+   * A message that does not exist is learned. A message in sent is sent but not learned.
+   * if a message is sent 30 times and not delivered, we skip it.
+   * 
+   * TODO I doubt I need a map of sent, I think I need only to watch one element with my current
+   * resend procedure. 
+   */
+  def messageSender(startTime: Long, sent: Map[UUID, (InputValue, Int)], toSend: List[String]): Receive = {
+    case SendNext => 
       val msgID = UUID.randomUUID()
-      val msg = InputValue(msgID, input)
+      val msg = InputValue(msgID, toSend.head)
       commManager ! msg
-      context.become(messageSender(startTime, state +  ( msgID -> (msg, Added) ) )) 
-
-    case ToSend(input, rest) => 
-      val msgID = UUID.randomUUID()
-      val msg = InputValue(msgID, input)
-      commManager ! msg
-      context.become(messageSender(startTime, state +  ( msgID -> (msg, Added) ) ))
-      self ! ToSend(rest.head, rest.tail)
-
+      context.become(messageSender(startTime, sent +  ( msgID -> (msg,0)), toSend.tail ) )
+          
     case Learn(seq, v_id, v_val) =>
-      val msgWithID = state.get(v_id)
+      // delete all messages resent 30 time too
+      val retriedLessThan30MinThis = sent.filter(x =>  x._2._2 < 30) - (v_id)
+      context.become(messageSender(startTime, retriedLessThan30MinThis, toSend)) // TODO be sure this delete will not crash anything.
+         
+      val msgWithID = sent.get(v_id)
+      
       msgWithID match {
         case Some((value, _)) => // can be non because msg was confirming a value from another client
-          context.become(messageSender(startTime,
-            state + (v_id -> ((value, LearnedInput)))))
-            
-          val items = state.toList.filter(x => x._2._2 match {
-            case Added =>
-              true
-            case _ => false
-          })
-        val confirmedWithCurrent = items.size - 1
-        
-        val miliseconds = (System.nanoTime - startTime) / 1000000
-        val seconds = miliseconds / 1000
-        
-        if(confirmedWithCurrent == 0) { println ("all vals decided in " + miliseconds + " milliseconds " + " (" + seconds + " seconds) "); context.stop(self) }        
+        if (toSend.size == 0 && retriedLessThan30MinThis.size == 0) {
+          val miliseconds = (System.nanoTime - startTime) / 1000000
+          val seconds = miliseconds / 1000
+          println ("all vals decided in " + miliseconds + " milliseconds " + " (" + seconds + " seconds) "); context.stop(self)   
+        }
+        else {
+          self ! SendNext
+        }
         case None => Unit
-      }      
-      case timeout: ReceiveTimeout =>
-        // on timeout, resend everything not yet learned. 
-        // TODO is this good enough or do I need a timer that would resend independant of any event?
-        val items = state.toList.filter( x => x._2._2 match { 
-          case Added =>
-            true 
-          case _ => false})          
-        items.foreach(x => commManager ! x._2._1)
-        if(items.isEmpty) println ("all vals decided in ")
+      }     
+        
+      // TODO problem: two clients two leaders. On leader change one client always times out.
+    case timeout: ReceiveTimeout =>
+      println("timeout!!!")
+        val retryVal = sent.find(_._2._2 < 30)
+        retryVal match {
+          case Some((v_id, (msg, retries))) =>
+            sent + (v_id -> (msg, retries + 1))
+            commManager ! msg
+          case None => ()
+        }
+        
   }
 }

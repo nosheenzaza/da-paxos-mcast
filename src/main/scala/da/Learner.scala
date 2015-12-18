@@ -26,8 +26,12 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
   commManager ! Init
   override def receive =  PartialFunction[Any, Unit]{
     case CommunicationManagerReady => println("Learner " + id + " is ready receive and process requests.")
+    println("Learner will send a catchup command in 5 seconds, if no out of order messages received...")
     context.become( paxosImpl(seqStart, Map(), Set()) )
-    commManager ! SyncRequest
+    
+//    case timeout: ReceiveTimeout => 
+//      println("Trying again to prepare communication manager")
+//      commManager ! Init
   } orElse super.receive
   
   
@@ -56,6 +60,7 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
             pending + ( seq -> v_val),
             printedMessages + v_id
             ) )
+//       commManager ! SyncRequest(nextPrint)
       }
       
    def printRest(startSeq: Long): Long = {
@@ -75,8 +80,11 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
     }
   }
   case timeout: ReceiveTimeout =>
-    // TODO very inefficient, fix later.
-     commManager ! SyncRequest  
+    
+    println("Requesting up to a 1000 missing values...")
+    val next500 = (nextPrint to nextPrint + 1000L).toList
+    next500.foreach { x => commManager ! SyncRequest(x) }
+       
   }
   
  

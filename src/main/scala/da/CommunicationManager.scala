@@ -29,6 +29,7 @@ import UDPMulticastConf._
  * TODO how can we deal with the fact that UDP datagrams might be dropped? or do we not have to worry about that?
  */
 object UdpHeaders {
+  // TODO use a proper serializer instead of this junk.
   val separator = " "
   val inputMessage = "INPUT"
   val phase1A = "1A"
@@ -119,7 +120,7 @@ class CommunicationManager( address: InetAddress,
     case b1 @ Phase1B(id, rnd) => log.info("sending 1B from manager to proposer!"); proposer ! b1
     case a2 @ Phase2A(c_rnd, seq, uuid, msgBody) => send ! Udp.Send( ByteString (phase2A + separator + c_rnd + separator + seq + separator + uuid + separator + msgBody), groups("acceptor") )
     case b2 @ Phase2B(acc_id, c_rnd, seq, v_rnd, v_id, stored_v_val) => proposer ! b2
-    case s  @ SyncRequest => proposer ! s
+    case s  @ SyncRequest(_) => proposer ! s
     case l  @ Learn(seq, selected_id, selected_val) =>
       sender match {
         case _ if sender.path.name.contains("proposer") =>
@@ -149,6 +150,6 @@ class CommunicationManager( address: InetAddress,
   
    def learnerRouter(learner: ActorRef, send: ActorRef): Receive = {
      case l  @ Learn(_,_,_) => learner ! l 
-     case SyncRequest => send ! Udp.Send(ByteString(syncRequest + separator + "bh"), groups("proposer"))
+     case SyncRequest(seq) => send ! Udp.Send(ByteString(syncRequest + separator + seq), groups("proposer"))
    }
 }

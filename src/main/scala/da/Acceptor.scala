@@ -4,8 +4,12 @@ import akka.actor.{ ActorRef, ActorSystem, Props, Actor, ActorLogging }
 import akka.io.{ IO, Udp }
 import akka.io.Inet.{ SocketOption, DatagramChannelCreator, SocketOptionV2 }
 import akka.util.ByteString
+import akka.actor.ReceiveTimeout
+
 
 import java.util.UUID
+import scala.concurrent.duration._
+import scala.language.postfixOps
 
 import UDPMulticastConf._
 
@@ -25,10 +29,14 @@ class Acceptor(id: Int, commManager: ActorRef) extends Participant(id, commManag
   import Acceptor._
   
   commManager ! Init
-   
+  
+  context.setReceiveTimeout( 2 seconds)
   override def receive =  PartialFunction[Any, Unit]{
     case CommunicationManagerReady => println("Acceptor " + id + " is ready receive and process requests.")
     context.become( paxosImpl(Map(), 0) )
+    case timeout: ReceiveTimeout => 
+      println("Trying again to prepare communication manager")
+      commManager ! Init
   } orElse super.receive
   
   def paxosImpl(

@@ -104,7 +104,7 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
           communicationManager ! Phase2B(acc_id, c_rnd, seq, v_rnd, v_id, stored_v_val)
           
         case `learn` => 
-//          log.info(" sending learned val to learner through comm. manager: " + body)
+          log.info(" sending learned val to learner through comm. manager: " + body)
           val (seq, selected_id, selected_val) = 
             { val array = body.split(separator)
               (array(0).toLong, UUID.fromString(array(1)), array(2))}          
@@ -115,8 +115,8 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
           communicationManager ! IncomingHeartBeat(body.toLong)
           
         case `syncRequest` =>
-//          log.info(" sending sync request to other proposers ")
-          communicationManager ! SyncRequest
+          log.info(" sending sync request to other proposers ")
+          communicationManager ! SyncRequest(body.toLong)
           
         case unknown => log.info("Unkonwn header! " + unknown)
       }

@@ -209,7 +209,7 @@ object Proposer {
   case class InputValue(id: UUID, value: String)
   case class Phase1B(acceptor_id: Int, rnd: Long)
   case class Phase2B(acceptor_id: Int, rnd: Long, seq: Long, v_rnd: Long, v_id: UUID, v_val: String)
-  case object SyncRequest
+  case class SyncRequest(seq: Long)
   
   def nAcceptors = 3
   
@@ -241,11 +241,10 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
       roleState: ProposerState,
       msgState: Map[UUID, (String, ValueState)],
       seqState: Map[Long, SeqState], // seq ->SeqState
-      c_rnd: Long) // Largest seen round number
-  : Receive = {
+      c_rnd: Long /* Largest seen round number*/): Receive = {
     
     case InputValue(uuid, msgBody) =>
-      log.info("Recieved " + uuid + " " + msgBody + " at " + self )
+      log.info(s"Recieved $uuid $msgBody at $self" )
       roleState match {
         /*
          * No leader was elected or I have not seen a leader yet, execute phase 1A
@@ -344,7 +343,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
                   seqState,
                   c_rnd))
              // resend all non-processed messages.
-             msgState.filter(x => x._2._2 == NotAssigned ).foreach( x => self ! InputValue(x._1, x._2._1))
+             msgState.foreach( x => if(x._2._2 == NotAssigned) self ! InputValue(x._1, x._2._1))
               
             }
           }
@@ -408,7 +407,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
                     commManager ! Learn(seq, selected_id, selected_val)
                   }
                 }
-              case _ => Unit // we don't care otherwise
+              case _ => () // we don't care otherwise
             }
           }
           
@@ -422,6 +421,8 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
         case Leader(_,_) => commManager ! h
         case WaitingLeaderDecision(_) =>
           log.info("Received own beat while waiting decision, will ask for it again")
+//          val nextLargestRound = nextLargestSeq(id, nReplicas, c_rnd)
+          // TODO be sure c_rnd sending would be enough.
             commManager ! Phase1A(c_rnd) // if I did not get a decision, re-ask for it.
             // what about values and so? it does not matter as long as learners are always asking for values
             // and clients keep trying to resend, we can afford to lose confirmations from acceptors!
@@ -461,12 +462,14 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
           case _ => context.become(paxosImpl(Listener(beginFailureDetector), msgState, seqState, round)) // I think this is how it should be, but not sure.
         }
       }
-      
-    // I only care when I am the listener. Otherwise I can ignore I guess
+
+// I only care when I am listener, if I am waiting for decision this will be detected at heartbeat.
     case ReceiveTimeout =>
-      println("No more heartbeats detectable, start another leader election round ")
-      
-      val nextLargestRound = nextLargestSeq(id, nReplicas, c_rnd)
+      roleState match {
+        case Listener(failureDetector) =>
+          println("No more heartbeats detectable, start another leader election round ")
+          context.stop(failureDetector)
+          val nextLargestRound = nextLargestSeq(id, nReplicas, c_rnd)
           log.info("Rounds state for " + self.path.name + " OLD: " + c_rnd + " NEW: " + nextLargestRound)
           commManager ! Phase1A(nextLargestRound)
           context.become(
@@ -474,13 +477,30 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
               WaitingLeaderDecision(Set()),
               msgState,
               seqState,
-              nextLargestRound ))
-      
-    case SyncRequest => 
-          seqState.foreach( x => x._2 match {
-            case Learned(uuid, v) => commManager ! Learn(x._1, uuid, v)
-            case other => ()// here I can bind something and send to the learner but whatever
-          })
+              nextLargestRound))
+        case _ => ()
+      }
+
+    case SyncRequest(seq) =>
+      roleState match {
+        case Leader(_, _) =>
+          seqState.get(seq) match {
+            case Some(x) =>
+              x match {
+                // TODO this causes multicast which can cause too many messages, but whatever. 
+                case Learned(uuid, v) => commManager ! Learn(seq, uuid, v)
+                case _                => ()
+              }
+            case _ => ()
+          }
+        case _ => ()
+      }
+          
+          
+//          foreach( x => x._2 match {
+//            
+//            case other => ()// here I can bind something and send to the learner but whatever
+//          })
 //    case Learn(seq, v_id, v_val) =>
 
     case a => log.info("Message not processed " + a) 
