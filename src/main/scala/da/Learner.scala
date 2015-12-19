@@ -15,19 +15,20 @@ object Learner {
  case class Learn(seq: Long, v_id: UUID, v_val: String) 
  def props(id: Int, commManager: ActorRef) = Props( new Learner(id, commManager))
 }
-  
+
+// TODO check if additional printed status stuff will affect the evaluation. Remove if needed.
 class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManager) with ActorLogging { 
   import context.system
   import CommunicationManager._
   import Proposer._
   import Learner._
  
-  context.setReceiveTimeout( 5 seconds)
+  context.setReceiveTimeout( 10 milliseconds)
   commManager ! Init
   override def receive =  PartialFunction[Any, Unit]{
     case CommunicationManagerReady => println("Learner " + id + " is ready receive and process requests.")
-    println("Learner will send a catchup command in 5 seconds, if no out of order messages received...")
     context.become( paxosImpl(seqStart, Map(), Set()) )
+    commManager ! SyncRequest(seqStart)
     
 //    case timeout: ReceiveTimeout => 
 //      println("Trying again to prepare communication manager")
@@ -75,15 +76,14 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
     if(start == end)
       pending
     else {
-      val endsRemoved = (pending - start) - end // TODO if element do not exist may get an error
+      val endsRemoved = (pending - start) - end 
       removePrinted(start + 1, end -1, endsRemoved )
     }
   }
   case timeout: ReceiveTimeout =>
+    commManager ! SyncRequest(nextPrint)
     
-    println("Requesting up to a 1000 missing values...")
-    val next500 = (nextPrint to nextPrint + 1000L).toList
-    next500.foreach { x => commManager ! SyncRequest(x) }
+//    case UdpSenderDied => Thread.sleep(500)
        
   }
   

@@ -174,7 +174,7 @@ object Proposer {
   sealed trait ProposerState
   case object InitState extends ProposerState
   case class WaitingLeaderDecision(replies: Set[Int]) extends ProposerState
-  case class Leader(heart: ActorRef, nextSeq: Long) extends ProposerState
+  case class Leader(nextSeq: Long) extends ProposerState
   case class Listener(heartFailure: ActorRef) extends ProposerState
   
   sealed trait ValueState
@@ -195,10 +195,11 @@ object Proposer {
   
   
   /******************    Liveness Stuff, heartbeats, failure detector...etc    ******************/
+  case object LocalBeat
   case class HeartBeat(round: Long)
   case class IncomingHeartBeat(round: Long)
   case object StopBeats
-  val heartBeatInterval = 3 seconds
+  val heartBeatInterval = 250 milliseconds
   val skippedHeartbeatsCount = 3
 //  val heartbeatFailureDetector = new DeadlineFailureDetector(6 seconds, heartBeatInterval)
   
@@ -234,6 +235,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
   override def receive =  PartialFunction[Any, Unit]{
     case CommunicationManagerReady => println("Proposer " + id + "  is ready receive and process requests.")
     context.become( paxosImpl(InitState, Map(), Map(), id) )
+    beginHeartBeats() //TODO this can be dangerous, as I am not stopping previous hearts. Maybe stop them if needed :P
   } andThen super.receive
   
   
@@ -273,11 +275,11 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
               seqState,
               c_rnd))
               
-        case Leader(heart, seq) => 
+        case Leader(seq) => 
           log.info("Received new input as a leader from "+ sender)
           context.become(
             paxosImpl(
-              Leader(heart, seq + 1),
+              Leader(seq + 1),
               msgState + (uuid -> (msgBody, Assigned) ), 
               seqState + (seq -> Proposed(uuid) ),
               c_rnd))
@@ -335,10 +337,10 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
               * I need to handle that somehow. Maybe at the step after I will 
               * retreat the current leader.
               */
-              println("Got enough acks, becoming the leader...")
+              println(s"Got enough acks, becoming the leader with ballot $c_rnd...")
               context.become(
                 paxosImpl(
-                  Leader(beginHeartBeats(c_rnd), seqStart), //TODO if you want to synchronize with older leaders, you should not put 0 here but check the seq state.
+                  Leader(seqStart), //TODO if you want to synchronize with older leaders, you should not put 0 here but check the seq state.
                   msgState,
                   seqState,
                   c_rnd))
@@ -352,7 +354,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
       
     case Phase2B(acc_id, rnd, seq, v_rnd, v_id, v_val) =>
       roleState match {
-        case Leader(heart, currentSeq) =>
+        case Leader(currentSeq) =>
           if(rnd == c_rnd) {// if this message is actually to me
             // check if I reached the number of needed messages for the seq
             // TODO will there always be a value here? it should exist I guess as I only consider replies to myself
@@ -362,7 +364,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
                 
                 context.become(
                 paxosImpl(
-                  Leader(heart, currentSeq),
+                  Leader(currentSeq),
                   msgState,
                   seqState + (seq -> AcceptedOnce(acc_id, (v_rnd, v_id, v_val, original_uuid))),
                   c_rnd))
@@ -380,7 +382,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
                 if (prevId != acc_id) {
                   if (v_rnd == c_rnd && pre_vrnd == c_rnd) { // value I proposed can go! update message and seq states
                     context.become(paxosImpl(
-                      Leader(heart, currentSeq), // no need to change seq here.
+                      Leader(currentSeq), // no need to change seq here.
                       msgState + (v_id -> (v_val, Assigned)), // a marker so we do not use it again, but maybe I can delete it, no i wont so I know it is used if client sends again
                       seqState + (seq -> Learned(v_id, v_val)),
                       c_rnd))
@@ -396,7 +398,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
                     val original_val = msgState(original_uuid)._1
                     
                     context.become(paxosImpl(
-                      Leader(heart, currentSeq), // again no need to change seq here!
+                      Leader(currentSeq), // again no need to change seq here!
                       (msgState + (selected_id -> (selected_val, Assigned))) + (original_uuid -> (original_val, NotAssigned)), // unbind and try again to bin to another seq
                       seqState + (seq -> Learned(selected_id, selected_val)),
                       c_rnd))
@@ -415,17 +417,32 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
           
       }
       
-    case h @ HeartBeat(round) =>
+    case LocalBeat =>
       log.info("Received own beat")
       roleState match {
-        case Leader(_,_) => commManager ! h
+        case Leader(_) => commManager ! HeartBeat(c_rnd) // only the leader broadcasts heartbeats
         case WaitingLeaderDecision(_) =>
-          log.info("Received own beat while waiting decision, will ask for it again")
+          log.info("Received own beat while waiting decision, will resend request")
 //          val nextLargestRound = nextLargestSeq(id, nReplicas, c_rnd)
-          // TODO be sure c_rnd sending would be enough.
-            commManager ! Phase1A(c_rnd) // if I did not get a decision, re-ask for it.
-            // what about values and so? it does not matter as long as learners are always asking for values
-            // and clients keep trying to resend, we can afford to lose confirmations from acceptors!
+//          println(s"ballots is $nextLargestRound")
+          commManager ! Phase1A(c_rnd)
+//          context.become(
+//            paxosImpl(
+//              WaitingLeaderDecision(Set()),
+//              msgState,
+//              seqState,
+//              nextLargestRound))
+        case InitState => 
+          println("Received own beat while at initial state, will try to become leader")
+          val nextLargestRound = nextLargestSeq(id, nReplicas, c_rnd)
+          println(s"ballots is $nextLargestRound")
+          commManager ! Phase1A(nextLargestRound)
+          context.become(
+            paxosImpl(
+              WaitingLeaderDecision(Set()),
+              msgState,
+              seqState,
+              nextLargestRound))
         case _ => Unit
         
       }
@@ -454,7 +471,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
         println("Detected real leader, becoming listener whatever I was doing and stopping beats. I was " + roleState)
         roleState match {
           // one can be more effecient and hand over the current sequence and sequence state, TODO maybe I do that later if there is time. 
-          case Leader(heart, seq) =>
+          case Leader(seq) =>
 //            heart ! StopBeats
             context.become(paxosImpl(Listener(beginFailureDetector), msgState, seqState, round)) // remember the round that beat me so I can generate something higher.
           case WaitingLeaderDecision(_) => 
@@ -468,7 +485,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
       roleState match {
         case Listener(failureDetector) =>
           println("No more heartbeats detectable, start another leader election round ")
-          context.stop(failureDetector)
+//          context.stop(failureDetector)
           val nextLargestRound = nextLargestSeq(id, nReplicas, c_rnd)
           log.info("Rounds state for " + self.path.name + " OLD: " + c_rnd + " NEW: " + nextLargestRound)
           commManager ! Phase1A(nextLargestRound)
@@ -483,7 +500,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
 
     case SyncRequest(seq) =>
       roleState match {
-        case Leader(_, _) =>
+        case Leader(_) =>
           seqState.get(seq) match {
             case Some(x) =>
               x match {
@@ -506,11 +523,11 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
     case a => log.info("Message not processed " + a) 
   }
   
-  def beginHeartBeats(round: Long): ActorRef =  {
+  def beginHeartBeats(): ActorRef =  {
     import context.dispatcher
     class ProposerHeart extends Actor {
       log.info("Heartbeats started with parent " + context.parent)
-      val beat = system.scheduler.schedule(0 seconds , heartBeatInterval, context.parent, HeartBeat(round))
+      val beat = system.scheduler.schedule(0 seconds , heartBeatInterval, context.parent, LocalBeat)
       override def receive = {
         case StopBeats => beat.cancel()
       } 
@@ -525,7 +542,7 @@ class Proposer(id: Int, nReplicas: Int, commManager: ActorRef) extends Participa
     class HeartFailureDetector extends Actor {
       log.info("Failure detector started with parent " + context.parent)
       // TODO fix this hardcoded limit, and figure out a reasonable timeout depending on the testing env
-      context.setReceiveTimeout( 6 seconds)
+      context.setReceiveTimeout(heartBeatInterval * skippedHeartbeatsCount )
       override def receive = {
         case timeout: ReceiveTimeout =>
           // stop timeout

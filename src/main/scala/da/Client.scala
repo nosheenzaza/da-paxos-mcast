@@ -52,7 +52,7 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
   
   commManager ! Init
   
-  context.setReceiveTimeout( 500 milliseconds)
+  context.setReceiveTimeout( 1 seconds)
   
   val maxRetry = 30
 
@@ -84,17 +84,23 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
           
     case Learn(seq, v_id, v_val) =>
       // delete all messages resent 30 time too
-      val retriedLessThan30MinThis = sent.filter(x =>  x._2._2 < 30) - (v_id)
-      context.become(messageSender(startTime, retriedLessThan30MinThis, toSend)) // TODO be sure this delete will not crash anything.
+      val retriedLessMaxMinThis = sent.filter(x =>  x._2._2 < maxRetry) - (v_id)
+      context.become(messageSender(startTime, retriedLessMaxMinThis, toSend)) // TODO be sure this delete will not crash anything.
          
       val msgWithID = sent.get(v_id)
       
       msgWithID match {
         case Some((value, _)) => // can be non because msg was confirming a value from another client
-        if (toSend.size == 0 && retriedLessThan30MinThis.size == 0) {
+        if (toSend.size == 0 && retriedLessMaxMinThis.size == 0) {
           val miliseconds = (System.nanoTime - startTime) / 1000000
           val seconds = miliseconds / 1000
-          println ("all vals decided in " + miliseconds + " milliseconds " + " (" + seconds + " seconds) "); context.stop(self)   
+          println ("all vals decided in " + miliseconds + " milliseconds " + " (" + seconds + " seconds) ");
+          val skippedVals = sent.filter(x =>  x._2._2 >= maxRetry)
+          println(s"Skipped inputs:")
+          if(skippedVals.size == 0) println("None")
+          else 
+            skippedVals.foreach(println)     
+          context.stop(self)   
         }
         else {
           self ! SendNext
@@ -102,16 +108,20 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
         case None => Unit
       }     
         
-      // TODO problem: two clients two leaders. On leader change one client always times out.
+      // TODO 30 times reply is too much per value
+      // TODO increase timeout
+      // TODO add a notification that the message was not delivered
     case timeout: ReceiveTimeout =>
-      println("timeout!!!")
-        val retryVal = sent.find(_._2._2 < 30)
+      log.info("Timeout at client")
+        val retryVal = sent.find(_._2._2 < maxRetry)
         retryVal match {
           case Some((v_id, (msg, retries))) =>
             sent + (v_id -> (msg, retries + 1))
             commManager ! msg
-          case None => ()
+          case None => 
+//            println ("Some inputs permanently dropped after trying to resend up to 30 times. Stopping...")
+//            context.stop(self)
         }
-        
+    case UdpSenderDied => println("death"); Thread.sleep(500)    
   }
 }

@@ -1,6 +1,6 @@
 package da
 
-import akka.actor.{ ActorRef, Props, Actor, ActorLogging }
+import akka.actor.{ ActorRef, Props, Actor, ActorLogging, AllDeadLetters, DeadLetter, Terminated, SuppressedDeadLetter }
 import akka.io.{ IO, Udp }
 import akka.io.Inet.{SocketOption, DatagramChannelCreator, SocketOptionV2 }
 import akka.io.Inet.SO.ReuseAddress
@@ -47,6 +47,7 @@ object UdpHeaders {
 object CommunicationManager {
   case object Init
   case object CommunicationManagerReady
+  case object UdpSenderDied
   
   def props(address: InetAddress,
                             port: Int, 
@@ -68,7 +69,6 @@ class CommunicationManager( address: InetAddress,
   import Learner._
   import UdpHeaders._
   import CommunicationManager._
-  
   val udpListener = system.actorOf(UdpMulticastListener.props(self, address, port, groups), "udp-receiver")
   val manager = IO(Udp)  
   
@@ -77,14 +77,16 @@ class CommunicationManager( address: InetAddress,
   // check how to fix this (if it is broken)
   override def receive = {
     case Init =>
-      println("Preparing UDP sender for " + sender.path.name + ". Please wait...")
+      log.info("Preparing UDP sender for " + sender.path.name + ". Please wait...")
       context.become(expectUdpReady(sender))
       manager ! Udp.SimpleSender(List(InetProtocolFamily(), ReuseAddress(true)))
-    
+      
+    system.eventStream.subscribe(self, classOf[AllDeadLetters])
   }
 
   def expectUdpReady(participantSender: ActorRef): Receive = {
     case Udp.SimpleSenderReady =>
+     context.watch(sender)
      log.info("Udp sender ready and now processing becoming router for " + participantSender.path.name)
       participantSender match {
         case _ if participantSender.path.name.contains("client")   =>
@@ -103,7 +105,8 @@ class CommunicationManager( address: InetAddress,
           log.info("becoming a learner router "); 
           context.become(learnerRouter(participantSender, sender))
           participantSender ! CommunicationManagerReady
-      }     
+      }
+    case other => handleSenderTermination(participantSender, other)
   }
   
   def clientRouter(client: ActorRef, send: ActorRef): Receive = {
@@ -111,7 +114,8 @@ class CommunicationManager( address: InetAddress,
       log.info(" recieved input value " + uuid + " " + msgBody)
       send ! Udp.Send(ByteString( inputMessage + separator + uuid + separator + msgBody ), groups("proposer"))
     case l  @ Learn(_,_,_) => client ! l
-      
+    case other => handleSenderTermination(client, other)
+
   }
   
   def proposerRouter(proposer: ActorRef, send: ActorRef): Receive = {
@@ -134,7 +138,8 @@ class CommunicationManager( address: InetAddress,
       
     case h  @ HeartBeat(round) => send ! Udp.Send(ByteString (heartBeat + separator + round), groups("proposer"))
     case hi @ IncomingHeartBeat(round) => proposer ! hi
-  }
+    case other => handleSenderTermination(proposer, other)   
+  } 
   
   def acceptorRouter(acceptor: ActorRef, send: ActorRef): Receive = {
     case a1 @ Phase1A(_) => acceptor ! a1
@@ -146,10 +151,31 @@ class CommunicationManager( address: InetAddress,
                                                                                         acc_id + separator +
                                                                                         c_rnd + separator + seq + separator + 
                                                                                         v_rnd + separator + v_id + separator + stored_v_val), groups("proposer"))
+    case other => handleSenderTermination(acceptor, other)
   }
   
    def learnerRouter(learner: ActorRef, send: ActorRef): Receive = {
      case l  @ Learn(_,_,_) => learner ! l 
      case SyncRequest(seq) => send ! Udp.Send(ByteString(syncRequest + separator + seq), groups("proposer"))
+     case other => handleSenderTermination(learner, other)
    }
+
+  def handleSenderTermination(participantSender: ActorRef, msg: Any) {
+    msg match {
+      case Udp.CommandFailed(_) => println("a failure!!")
+//      case d @ DeadLetter(message: Any, sender: ActorRef, recipient: ActorRef) =>
+//        println(s"Dead letter at manager $d")
+      case Terminated(a) =>
+//        println(s"Termination detected of $a")
+        if (a.path.toString.contains("IO-UDP-FF")) {
+          //        println("it was the fucking  UDP sender! resend request")
+          context.become(expectUdpReady(participantSender))
+          context.stop(a)
+          manager ! Udp.SimpleSender(List(InetProtocolFamily(), ReuseAddress(true)))
+          participantSender ! UdpSenderDied
+        }
+//      case SuppressedDeadLetter(_,_,_) => ()
+      case other => ()//println("another problem" + other)
+    }
+  }
 }

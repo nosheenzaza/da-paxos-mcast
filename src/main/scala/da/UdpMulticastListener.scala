@@ -1,6 +1,6 @@
 package da
 
-import akka.actor.{ ActorRef, Props, Actor, ActorLogging }
+import akka.actor.{ ActorRef, Props, Actor, ActorLogging, AllDeadLetters, DeadLetter, Terminated }
 import akka.io.{ IO, Udp }
 import akka.io.Inet.{SocketOption, DatagramChannelCreator, SocketOptionV2 }
 import akka.io.Inet.SO.ReuseAddress
@@ -62,6 +62,7 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
     case Udp.Bound(local) =>
       log.info("UDP listener Bound to: "+ local.getAddress + ":" + local.getPort)
       context.become(ready(sender))
+    case other => handleLisneterTermination(other)
   }
  
   // I could hack a bit and rely of the fast that I will always get a message  to my port
@@ -123,6 +124,22 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
        
     case Udp.Unbind  => socket ! Udp.Unbind
     case Udp.Unbound => context.stop(self)
-    case _ => println("something was recieved from " + sender)
+    case other  => handleLisneterTermination(other)
+  }
+  
+  def handleLisneterTermination(msg: Any) {
+    msg match {
+      case Udp.CommandFailed(_) => println("a failure!!")
+//      case d @ DeadLetter(message: Any, sender: ActorRef, recipient: ActorRef) =>
+//        println(s"Dead letter at manager $d")
+      case Terminated(a) =>
+//        println(s"Termination detected of $a")
+        if (a.path.toString.contains("IO-UDP-FF")) {
+          //        println("it was the fucking  UDP sender! resend request")
+          context.become(receive)
+          manager ! Udp.Bind(self, new InetSocketAddress(port), opts)
+        }
+      case other =>  ()
+    }
   }
 }
