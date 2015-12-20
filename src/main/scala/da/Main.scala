@@ -34,7 +34,6 @@ object Main {
     val communicationManager = paxosSystem.actorOf(
         CommunicationManager.props(processGroupAddress, processRolePort, groups, iface), "comm-manager" )
     
-    // TODO create case objects for role names and headers
     val participant = parsedArgs.roleName match {
       case "client" => paxosSystem.actorOf( 
           Client.props(parsedArgs.id, communicationManager, inputValues.toList),

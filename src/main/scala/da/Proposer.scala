@@ -52,7 +52,7 @@ object Proposer {
   
   val nAcceptors = 3
   val seqStart = 0
-  // TODO ensure below is correct
+
   /**
    * Since we do not know the number of replicas  which is needed to 
    * generate unique id's, assume a large enough one.
@@ -268,20 +268,9 @@ with ActorLogging {
       }
       if (round > c_rnd) {
         println(s"Detected real leader, becoming listener whatever I was doing and stopping beats. I was $roleState")
-        // TODO if everything works remove these
-//        roleState match {
-//          case Leader(seq) =>
-//            context.become(paxosImpl(
-//                
-//                Listener(beginFailureDetector), msgState, seqState, round))
-//          case WaitingLeaderDecision(_) => 
-//            context.become(paxosImpl(
-//                Listener(beginFailureDetector), msgState, seqState, round)) 
-//          case _ =>
         // remember the round that beat me so I can generate something higher.
             context.become(paxosImpl
               (Listener(beginFailureDetector), msgState, seqState, round)) 
-//        }
       }
 
       /*
@@ -305,7 +294,6 @@ with ActorLogging {
         case _ => ()
       }
 
-    // TODO remove these prints when you finish debugging
     case SyncRequest(seq) =>
       //      println("received request")
       roleState match {
@@ -351,9 +339,6 @@ with ActorLogging {
       
       override def receive = {
         case timeout: ReceiveTimeout =>
-          // TODO maybe I can return these
-          // stop timeout
-//          context.setReceiveTimeout(Duration.Undefined)
           context.parent ! timeout
           
         case IncomingHeartBeat(_) => log.debug("Some leader is alive")

@@ -8,8 +8,6 @@ import java.util.UUID
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-// TODO fix the empty line exception issue. 
-
 object Client {  
   private case object SendNext
   
@@ -79,6 +77,7 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
               val miliseconds = (System.nanoTime - startTime) / 1000000
               val seconds = miliseconds / 1000
               println(s"All vals decided in $miliseconds milliseconds ($seconds seconds) ");
+              Console.flush()
               context.stop(self)
             } else {
               self ! SendNext

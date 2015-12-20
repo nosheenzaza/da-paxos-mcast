@@ -13,7 +13,6 @@ object Learner {
  def props(id: Int, commManager: ActorRef) = Props( new Learner(id, commManager))
 }
 
-// TODO check if additional printed status stuff will affect the evaluation. Remove if needed.
 /**
  * Learner prints stored value and sends requests when timeout is passed.
  */
@@ -23,7 +22,6 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
   import Proposer._
   import Learner._
  
-  // TODO I think a larger timeout would work too, since we are printing.
   context.setReceiveTimeout(10 milliseconds)
   
   commManager ! Init
@@ -89,8 +87,6 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
     // maybe this is not a bad thing though
     case timeout: ReceiveTimeout =>
       commManager ! SyncRequest(nextPrint)
-
-    //    case UdpSenderDied => Thread.sleep(500)
 
   } 
 }

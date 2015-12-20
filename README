@@ -1,15 +1,102 @@
-Read me
 
-ip v4
 
-limit on process count
+REQUIREMENTS:
 
-sbt and stuff
+- Java 7 or higher.
+ 
+- SBT (Scala Build Tool) version 0.13.5. Instructions for all major OSs can be found here:
 
-adding to routing table
+http://www.scala-sbt.org/0.13.5/docs/Getting-Started/Setup.html
 
-specifying network interface
+There is no need to install Scala, because the language and all dependencies will be 
+packaged in one assembly jar which can be easily run with java.
 
-use of ipfw
+It might be possible to use other SBT versions but i have not tried that myself.
 
-attached presentation with updated performance results and code changes
+
+
+COMPILING AND PACKAGING
+
+Go to the project directory da-paxos, and from there run the command:
+
+sbt assembly
+
+This will download the Scala language and all dependencies, and will compile the project and
+place everything in a jar that can be run with Java. The provided bash scripts take care of
+running the application.
+
+
+
+RUNNING THE APPLICATION
+
+- The application needs to know the network interface name on which to perform multicast.
+This is hardcoded inside the bash scripts as required, but must be adjusted depending 
+on the environment.
+
+- It may be needed to add the multicast address to the routing table with this command:
+sudo route add -net 239.0.0.1 default
+
+The command looks slightly different on Linux.
+
+Note that multicasting is done over IPV4.
+
+
+
+FURTHER ASSUMPTIONS
+
+Other than the assumptions given in the project description, I am also assuming an upper 
+limit on the number of propers (hardcoded 10), in order to be able to use the following formula to generate
+unique, increasing ballot numbers:
+
+largestSeenSeq - (largestSeenSeq % nReplicas) + nReplicas + id
+
+While I doubt the application will be tested with more than 10 proposer, this can be changed at line 60 of 
+file Proposer.scala: val proposerReplicas = 10.
+
+
+
+A NOTE ON TESTING LEARNER CATCHUP
+
+Because catchup can be quite expensive, I am limiting the frequency of sync requests to 1/10 ms. This makes 
+learners slow in catching up, especially that we were not allowed to use anything but multicast. 
+I found the limit of 5 seconds at the end might not be enough to catch up with large sequences. Setting 
+it to 20 seconds should allow learners to catchup better with larger inputs sizes.
+
+A NOTE ON PERFORMANCE RESULTS
+
+I tested my code with up to 100 000 values without message loss, while killing 1 acceptor and the 
+current leader. It works nicely but takes more than 5 seconds. again with 20 seconds more values
+can be learned.
+
+Under the limit of 5 seconds, I got the following results:
+With a 1000 values per propoers: I got the following:
+All vals decided in 2518 milliseconds (2 seconds) 
+All vals decided in 2559 milliseconds (2 seconds) 
+All checks passed.
+
+With 5000 values per proposer, not all values could be learnt. Each learner learnt around 
+3500 values in 5 seconds and not all values were decided.
+
+Under the limit of 20 seconds:
+5000 values per client:
+All vals decided in 7523 milliseconds (7 seconds) 
+All vals decided in 7540 milliseconds (7 seconds) 
+All checks passed.
+
+10 000 per client
+All vals decided in 10113 milliseconds (10 seconds) 
+All vals decided in 10176 milliseconds (10 seconds) 
+All checks pass
+
+50 000 per client:
+Not all values were decided, each learner learned around 30 000 values.
+
+With 10% message loss and 1000 values per client, and a deadline of 20 seconds, each 
+learner learned 3 values. I found that Udp senders die under message loss and load
+caused by retries. Reviving them takes time and causes these bad results.
+
+In the presence of message loss, all values can be decided, but learners will be too slow catching up. 
+I could not use iptables on mac so I used ipfw instead.
+
+
+
