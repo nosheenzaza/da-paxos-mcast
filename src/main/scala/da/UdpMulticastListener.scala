@@ -45,7 +45,6 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
   val manager = IO(Udp)
   val opts = List(InetProtocolFamily(), ReuseAddress(true), group)
 
-  println("Preparing UDP Listener. Please wait...")
   manager ! Udp.Bind(self, new InetSocketAddress(port), opts)
 
   def receive = {
@@ -120,18 +119,18 @@ class UdpMulticastListener(communicationManager: ActorRef, address: InetAddress,
       }
        
     // TODO maybe change this logic later.  
-    case Udp.Unbind  => println("Unbind received!! "); socket ! Udp.Unbind
-    case Udp.Unbound => println("Unbound!!!"); context.stop(self)
+    case Udp.Unbind  => /*println("Unbind received!! ");*/ socket ! Udp.Unbind
+    case Udp.Unbound => /*println("Unbound!!!");*/ context.stop(self)
     case other  => handleLisneterTermination(other)
   }
   
   def handleLisneterTermination(msg: Any) {
     msg match {
-      case Udp.CommandFailed(command) => println(s"A failure of $command")
+      case Udp.CommandFailed(command) => ()//println(s"A failure of $command")
       case d @ DeadLetter(message: Any, sender: ActorRef, recipient: ActorRef) =>
-        println(s"Dead letter at listener $d")
+//        println(s"Dead letter at listener $d")
       case Terminated(a) =>
-        println(s"Termination at listener detected of $a")
+//        println(s"Termination at listener detected of $a")
         if (a.path.toString.contains("IO-UDP-FF")) {
           //        println("it was the fucking  UDP sender! resend request")
           context.become(receive)

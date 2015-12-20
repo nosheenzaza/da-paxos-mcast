@@ -24,7 +24,11 @@ object Main {
     val processGroupAddress = groups(parsedArgs.roleName).getAddress
     val processRolePort = groups(parsedArgs.roleName).getPort
     val iface = parsedArgs.iface
-    val inputValues = scala.io.Source.fromFile("values").getLines()
+    val inputValues = io.Source.stdin.getLines //scala.io.Source.fromFile("values").getLines() 
+       
+    
+//    println("here are the inputs ")
+//    inputValues.foreach { println }
     
     val paxosSystem = ActorSystem("paxos-broadcast")
     val communicationManager = paxosSystem.actorOf(
@@ -65,6 +69,9 @@ object Main {
       arg[String]("<iface>") required () valueName ("<iface>") action {
         case (x, c) => c.copy(iface = x)
       }
+//      arg[Seq[String]]("<inputs>") optional() valueName ("<inputs>") action {
+//        case (x, c) => c.copy(inputs = x)
+//      }
     }
 
     parser.parse(args, Config("", -1, new File("config"), "")) match {

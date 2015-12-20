@@ -145,7 +145,7 @@ class CommunicationManager( address: InetAddress,
     case s @ SyncRequest(seq)   => send ! Udp.Send(ByteString(
         syncRequest + separator + seq), groups("proposer"))      
     case d @ DeadLetter(message: Any, sender: ActorRef, recipient: ActorRef) =>
-      println("termination detected by deads. The network is shacky...")
+//      println("termination detected by deads. The network is shacky...")
         if (recipient.path.toString.contains("IO-UDP-FF")) {
           context.become(waitTogotoSlowRouter(learner))
           context.stop(recipient)
@@ -153,7 +153,7 @@ class CommunicationManager( address: InetAddress,
         }
     case Terminated(a) =>
         if (a.path.toString.contains("IO-UDP-FF")) {
-          println("termination detected of ${a.path}. The network is shacky...")
+//          println(s"termination detected of ${a.path}. The network is shacky...")
           context.become(waitTogotoSlowRouter(learner))
           context.stop(a)
           manager ! Udp.SimpleSender(List(InetProtocolFamily(), ReuseAddress(true)))

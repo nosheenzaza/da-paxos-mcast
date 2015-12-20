@@ -24,13 +24,13 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
   import Learner._
  
   // TODO I think a larger timeout would work too, since we are printing.
-  context.setReceiveTimeout( 10 milliseconds)
+  context.setReceiveTimeout(10 milliseconds)
   
   commManager ! Init
 
   override def receive = {
     case CommunicationManagerReady =>
-      println(s"Learner $id is ready receive and process requests.")
+//      println(s"Learner $id is ready receive and process requests.")
       context.become(paxosImpl(seqStart, Map(), Set()))
       commManager ! SyncRequest(seqStart) 
   }
@@ -44,7 +44,7 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
       // Print current and  then check if there is more to be printed 
       if (seq == nextPrint) {
         val associatedValPrinted = printedMessages.contains(v_id);
-        if (!associatedValPrinted) println(seq + " " + v_val)
+        if (!associatedValPrinted) {println(v_val); Console.flush}
 
         val waitingPoint = printRest(seq + 1) // here we skip the sequence and consider it printed.
         val restofPending = removePrinted(seq + 1, waitingPoint, pending)
@@ -65,8 +65,10 @@ class Learner(id: Int, commManager: ActorRef) extends Participant(id, commManage
         val possibleNext = pending.get(startSeq)
         possibleNext match {
           case Some(value) =>
-            if (!printedMessages.contains(v_id))
-              println(startSeq + " " + value)
+            if (!printedMessages.contains(v_id)) {
+              println(value)
+              Console.flush
+            }
             printRest(startSeq + 1)
 
           case None => startSeq

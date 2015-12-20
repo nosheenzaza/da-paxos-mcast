@@ -316,7 +316,7 @@ with ActorLogging {
                 // This causes multicast which can cause too many messages, but whatever
                 // since we cannot use anything else.
                 case Learned(uuid, v) =>
-                  commManager ! Learn(seq, uuid, v); println("sending val..")
+                  commManager ! Learn(seq, uuid, v); // println("sending val..")
                 case _ => ()
               }
             case _ => ()

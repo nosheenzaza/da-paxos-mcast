@@ -98,6 +98,6 @@ class Client(id:Int, commManager: ActorRef, inputs: List[String])
         }
       
     // TODO I think this will block from receiving as well, fix!
-    case UdpSenderDied => println("death"); Thread.sleep(200)    
+    case UdpSenderDied => println("Udp Sender Died, Reviving..."); Thread.sleep(200)    
   }
 }
